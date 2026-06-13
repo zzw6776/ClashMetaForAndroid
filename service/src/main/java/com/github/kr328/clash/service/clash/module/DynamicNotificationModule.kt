@@ -5,20 +5,21 @@ import android.app.Service
 import android.content.Intent
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.getSystemService
 import com.github.kr328.clash.common.compat.getColorCompat
 import com.github.kr328.clash.common.compat.pendingIntentFlags
+import com.github.kr328.clash.common.compat.startForegroundCompat
 import com.github.kr328.clash.common.constants.Components
 import com.github.kr328.clash.common.constants.Intents
-import com.github.kr328.clash.common.util.ticker
 import com.github.kr328.clash.core.Clash
 import com.github.kr328.clash.core.util.trafficDownload
 import com.github.kr328.clash.core.util.trafficUpload
 import com.github.kr328.clash.service.R
 import com.github.kr328.clash.service.StatusProvider
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import java.util.concurrent.TimeUnit
 
@@ -27,6 +28,8 @@ class DynamicNotificationModule(service: Service) : Module<Unit>(service) {
         .setSmallIcon(R.drawable.ic_logo_service)
         .setOngoing(true)
         .setColor(service.getColorCompat(R.color.color_clash))
+        .setCategory(NotificationCompat.CATEGORY_SERVICE)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setOnlyAlertOnce(true)
         .setShowWhen(false)
         .setContentTitle("Not Selected")
@@ -41,9 +44,10 @@ class DynamicNotificationModule(service: Service) : Module<Unit>(service) {
             )
         )
 
-    private val notificationManager = NotificationManagerCompat.from(service)
+    private var lastContentText: String? = null
+    private var lastSubText: String? = null
 
-    private fun update() {
+    private fun update(force: Boolean = false) {
         val now = Clash.queryTrafficNow()
         val total = Clash.queryTrafficTotal()
 
@@ -52,26 +56,31 @@ class DynamicNotificationModule(service: Service) : Module<Unit>(service) {
         val uploaded = total.trafficUpload()
         val downloaded = total.trafficDownload()
 
+        val contentText = service.getString(
+            R.string.clash_notification_content,
+            "$uploading/s", "$downloading/s"
+        )
+        val subText = service.getString(
+            R.string.clash_notification_content,
+            uploaded, downloaded
+        )
+
+        if (!force && contentText == lastContentText && subText == lastSubText)
+            return
+
+        lastContentText = contentText
+        lastSubText = subText
+
         val notification = builder
-            .setContentText(
-                service.getString(
-                    R.string.clash_notification_content,
-                    "$uploading/s", "$downloading/s"
-                )
-            )
-            .setSubText(
-                service.getString(
-                    R.string.clash_notification_content,
-                    uploaded, downloaded
-                )
-            )
+            .setContentText(contentText)
+            .setSubText(subText)
             .build()
 
-        notificationManager.notify(R.id.nf_clash_status, notification)
+        service.startForegroundCompat(R.id.nf_clash_status, notification)
     }
 
     override suspend fun run() = coroutineScope {
-        var shouldUpdate = service.getSystemService<PowerManager>()?.isInteractive ?: true
+        var interactive = service.getSystemService<PowerManager>()?.isInteractive ?: true
 
         val screenToggle = receiveBroadcast(false, Channel.CONFLATED) {
             addAction(Intent.ACTION_SCREEN_ON)
@@ -82,25 +91,26 @@ class DynamicNotificationModule(service: Service) : Module<Unit>(service) {
             addAction(Intents.ACTION_PROFILE_LOADED)
         }
 
-        val ticker = ticker(TimeUnit.SECONDS.toMillis(1))
+        launch {
+            while (true) {
+                if (interactive)
+                    update()
+
+                delay(TimeUnit.SECONDS.toMillis(1))
+            }
+        }
 
         while (true) {
             select<Unit> {
                 screenToggle.onReceive {
-                    when (it.action) {
-                        Intent.ACTION_SCREEN_ON ->
-                            shouldUpdate = true
-                        Intent.ACTION_SCREEN_OFF ->
-                            shouldUpdate = false
-                    }
+                    interactive = it.action == Intent.ACTION_SCREEN_ON
+
+                    if (interactive)
+                        update(force = true)
                 }
                 profileLoaded.onReceive {
                     builder.setContentTitle(StatusProvider.currentProfile ?: "Not selected")
-                }
-                if (shouldUpdate) {
-                    ticker.onReceive {
-                        update()
-                    }
+                    update(force = true)
                 }
             }
         }

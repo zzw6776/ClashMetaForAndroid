@@ -126,6 +126,9 @@
 
     <string name="auto_restart">Auto Restart</string>
     <string name="allow_clash_auto_restart">Allow clash auto restart</string>
+    <string name="ignore_battery_optimizations">Ignore Battery Optimizations</string>
+    <string name="ignore_battery_optimizations_summary">Allow the VPN service to keep running while the app is in the background</string>
+    <string name="ignore_battery_optimizations_enabled">Allowed</string>
 
     <string name="route_system_traffic">Route System Traffic</string>
     <string name="routing_via_vpn_service">Auto routing all system traffic via VpnService</string>

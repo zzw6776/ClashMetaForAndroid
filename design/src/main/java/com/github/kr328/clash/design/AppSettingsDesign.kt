@@ -19,10 +19,12 @@ class AppSettingsDesign(
     srvStore: ServiceStore,
     behavior: Behavior,
     running: Boolean,
+    batteryOptimizationIgnored: Boolean,
     onHideIconChange: (hide: Boolean) -> Unit,
 ) : Design<AppSettingsDesign.Request>(context) {
     enum class Request {
-        ReCreateAllActivities
+        ReCreateAllActivities,
+        OpenBatteryOptimizationSettings,
     }
 
     private val binding = DesignSettingsCommonBinding
@@ -47,6 +49,21 @@ class AppSettingsDesign(
                 title = R.string.auto_restart,
                 summary = R.string.allow_clash_auto_restart,
             )
+
+            clickable(
+                title = R.string.ignore_battery_optimizations,
+                icon = R.drawable.ic_baseline_flash_on,
+                summary = if (batteryOptimizationIgnored) {
+                    R.string.ignore_battery_optimizations_enabled
+                } else {
+                    R.string.ignore_battery_optimizations_summary
+                },
+            ) {
+                enabled = !batteryOptimizationIgnored
+                clicked {
+                    requests.trySend(Request.OpenBatteryOptimizationSettings)
+                }
+            }
 
             category(R.string.interface_)
 

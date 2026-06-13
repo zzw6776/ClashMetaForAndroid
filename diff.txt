@@ -1,0 +1,381 @@
+﻿diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index c29133e..4b30c97 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -16,6 +16,7 @@
+         tools:ignore="QueryAllPackagesPermission" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
++    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+ 
+     <application
+         android:name=".MainApplication"
+@@ -219,4 +220,4 @@
+             </intent-filter>
+         </receiver>
+     </application>
+-</manifest>
+\ No newline at end of file
++</manifest>
+diff --git a/app/src/main/java/com/github/kr328/clash/AppSettingsActivity.kt b/app/src/main/java/com/github/kr328/clash/AppSettingsActivity.kt
+index 2b4ed2c..b43b2a6 100644
+--- a/app/src/main/java/com/github/kr328/clash/AppSettingsActivity.kt
++++ b/app/src/main/java/com/github/kr328/clash/AppSettingsActivity.kt
+@@ -1,7 +1,12 @@
+ package com.github.kr328.clash
+ 
+-import android.content.ComponentName
++import android.content.Intent
+ import android.content.pm.PackageManager
++import android.net.Uri
++import android.os.Build
++import android.os.PowerManager
++import android.provider.Settings
++import androidx.core.content.getSystemService
+ import com.github.kr328.clash.common.util.componentName
+ import com.github.kr328.clash.design.AppSettingsDesign
+ import com.github.kr328.clash.design.model.Behavior
+@@ -12,6 +17,8 @@ import kotlinx.coroutines.isActive
+ import kotlinx.coroutines.selects.select
+ 
+ class AppSettingsActivity : BaseActivity<AppSettingsDesign>(), Behavior {
++    private var waitingBatteryOptimizationSettings = false
++
+     override suspend fun main() {
+         val design = AppSettingsDesign(
+             this,
+@@ -19,6 +26,7 @@ class AppSettingsActivity : BaseActivity<AppSettingsDesign>(), Behavior {
+             ServiceStore(this),
+             this,
+             clashRunning,
++            isIgnoringBatteryOptimizations(),
+             ::onHideIconChange,
+         )
+ 
+@@ -30,18 +38,61 @@ class AppSettingsActivity : BaseActivity<AppSettingsDesign>(), Behavior {
+                     when (it) {
+                         Event.ClashStart, Event.ClashStop, Event.ServiceRecreated ->
+                             recreate()
++                        Event.ActivityStart -> {
++                            if (waitingBatteryOptimizationSettings) {
++                                waitingBatteryOptimizationSettings = false
++                                recreate()
++                            }
++                        }
+                         else -> Unit
+                     }
+                 }
+                 design.requests.onReceive {
+-                    ApplicationObserver.createdActivities.forEach {
+-                        it.recreate()
++                    when (it) {
++                        AppSettingsDesign.Request.ReCreateAllActivities -> {
++                            ApplicationObserver.createdActivities.forEach {
++                                it.recreate()
++                            }
++                        }
++                        AppSettingsDesign.Request.OpenBatteryOptimizationSettings -> {
++                            openBatteryOptimizationSettings()
++                        }
+                     }
+                 }
+             }
+         }
+     }
+ 
++    private fun isIgnoringBatteryOptimizations(): Boolean {
++        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
++            return true
++        }
++
++        return getSystemService<PowerManager>()
++            ?.isIgnoringBatteryOptimizations(packageName)
++            ?: false
++    }
++
++    private fun openBatteryOptimizationSettings() {
++        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || isIgnoringBatteryOptimizations()) {
++            return
++        }
++
++        waitingBatteryOptimizationSettings = true
++
++        val request = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
++            .setData(Uri.parse("package:$packageName"))
++
++        runCatching {
++            startActivity(request)
++        }.onFailure {
++            startActivity(
++                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
++                    .setData(Uri.parse("package:$packageName"))
++            )
++        }
++    }
++
+     override var autoRestart: Boolean
+         get() {
+             val status = packageManager.getComponentEnabledSetting(
+diff --git a/app/src/main/java/com/github/kr328/clash/remote/Broadcasts.kt b/app/src/main/java/com/github/kr328/clash/remote/Broadcasts.kt
+index 9be7026..e33cd63 100644
+--- a/app/src/main/java/com/github/kr328/clash/remote/Broadcasts.kt
++++ b/app/src/main/java/com/github/kr328/clash/remote/Broadcasts.kt
+@@ -117,4 +117,4 @@ class Broadcasts(private val context: Application) {
+             Log.w("Unregister global receiver: $e", e)
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/com/github/kr328/clash/remote/Remote.kt b/app/src/main/java/com/github/kr328/clash/remote/Remote.kt
+index d8b249d..08947f9 100644
+--- a/app/src/main/java/com/github/kr328/clash/remote/Remote.kt
++++ b/app/src/main/java/com/github/kr328/clash/remote/Remote.kt
+@@ -70,4 +70,4 @@ object Remote {
+     private fun getLastUpdated(context: Context): Long {
+         return context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/com/github/kr328/clash/remote/Service.kt b/app/src/main/java/com/github/kr328/clash/remote/Service.kt
+index 3d901bf..5e76dc5 100644
+--- a/app/src/main/java/com/github/kr328/clash/remote/Service.kt
++++ b/app/src/main/java/com/github/kr328/clash/remote/Service.kt
+@@ -56,4 +56,4 @@ class Service(private val context: Application, val crashed: () -> Unit) {
+     companion object {
+         private val TOGGLE_CRASHED_INTERVAL = TimeUnit.SECONDS.toMillis(10)
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/design/src/main/java/com/github/kr328/clash/design/AppSettingsDesign.kt b/design/src/main/java/com/github/kr328/clash/design/AppSettingsDesign.kt
+index dc43d00..59d2d6e 100644
+--- a/design/src/main/java/com/github/kr328/clash/design/AppSettingsDesign.kt
++++ b/design/src/main/java/com/github/kr328/clash/design/AppSettingsDesign.kt
+@@ -19,10 +19,12 @@ class AppSettingsDesign(
+     srvStore: ServiceStore,
+     behavior: Behavior,
+     running: Boolean,
++    batteryOptimizationIgnored: Boolean,
+     onHideIconChange: (hide: Boolean) -> Unit,
+ ) : Design<AppSettingsDesign.Request>(context) {
+     enum class Request {
+-        ReCreateAllActivities
++        ReCreateAllActivities,
++        OpenBatteryOptimizationSettings,
+     }
+ 
+     private val binding = DesignSettingsCommonBinding
+@@ -48,6 +50,21 @@ class AppSettingsDesign(
+                 summary = R.string.allow_clash_auto_restart,
+             )
+ 
++            clickable(
++                title = R.string.ignore_battery_optimizations,
++                icon = R.drawable.ic_baseline_flash_on,
++                summary = if (batteryOptimizationIgnored) {
++                    R.string.ignore_battery_optimizations_enabled
++                } else {
++                    R.string.ignore_battery_optimizations_summary
++                },
++            ) {
++                enabled = !batteryOptimizationIgnored
++                clicked {
++                    requests.trySend(Request.OpenBatteryOptimizationSettings)
++                }
++            }
++
+             category(R.string.interface_)
+ 
+             selectableList(
+@@ -102,4 +119,4 @@ class AppSettingsDesign(
+ 
+         binding.content.addView(screen.root)
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/design/src/main/res/values-zh/strings.xml b/design/src/main/res/values-zh/strings.xml
+index be62f50..c391d3d 100644
+--- a/design/src/main/res/values-zh/strings.xml
++++ b/design/src/main/res/values-zh/strings.xml
+@@ -70,6 +70,9 @@
+     <string name="show_traffic_summary">在通知中自动刷新流量</string>
+     <string name="allow_clash_auto_restart">允许 Clash 自动重启</string>
+     <string name="auto_restart">自动重启</string>
++    <string name="ignore_battery_optimizations">忽略电池优化</string>
++    <string name="ignore_battery_optimizations_summary">允许 VPN 服务在应用后台运行时保持工作</string>
++    <string name="ignore_battery_optimizations_enabled">已允许</string>
+     <string name="stopped">已停止</string>
+     <string name="help">帮助</string>
+     <string name="tap_to_start">点此启动</string>
+diff --git a/design/src/main/res/values/strings.xml b/design/src/main/res/values/strings.xml
+index 2fe54fd..79dbeee 100644
+--- a/design/src/main/res/values/strings.xml
++++ b/design/src/main/res/values/strings.xml
+@@ -126,6 +126,9 @@
+ 
+     <string name="auto_restart">Auto Restart</string>
+     <string name="allow_clash_auto_restart">Allow clash auto restart</string>
++    <string name="ignore_battery_optimizations">Ignore Battery Optimizations</string>
++    <string name="ignore_battery_optimizations_summary">Allow the VPN service to keep running while the app is in the background</string>
++    <string name="ignore_battery_optimizations_enabled">Allowed</string>
+ 
+     <string name="route_system_traffic">Route System Traffic</string>
+     <string name="routing_via_vpn_service">Auto routing all system traffic via VpnService</string>
+diff --git a/service/src/main/AndroidManifest.xml b/service/src/main/AndroidManifest.xml
+index 167cddd..fe35a6a 100644
+--- a/service/src/main/AndroidManifest.xml
++++ b/service/src/main/AndroidManifest.xml
+@@ -18,7 +18,7 @@
+             android:process=":background"
+             android:foregroundServiceType="specialUse">
+             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+-                android:value="explanation_for_special_use"/>
++                android:value="proxy"/>
+         </service>
+         <service
+             android:name=".TunService"
+@@ -28,7 +28,7 @@
+             android:process=":background"
+             android:foregroundServiceType="specialUse">
+             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+-                android:value="explanation_for_special_use"/>
++                android:value="vpn"/>
+             <intent-filter>
+                 <action android:name="android.net.VpnService" />
+             </intent-filter>
+diff --git a/service/src/main/java/com/github/kr328/clash/service/TunService.kt b/service/src/main/java/com/github/kr328/clash/service/TunService.kt
+index 8550f8a..f08a766 100644
+--- a/service/src/main/java/com/github/kr328/clash/service/TunService.kt
++++ b/service/src/main/java/com/github/kr328/clash/service/TunService.kt
+@@ -97,7 +97,19 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
+     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+         sendClashStarted()
+ 
+-        return super.onStartCommand(intent, flags, startId)
++        return START_STICKY
++    }
++
++    override fun onRevoke() {
++        Log.w("TunService revoked by system")
++
++        super.onRevoke()
++    }
++
++    override fun onTaskRemoved(rootIntent: Intent?) {
++        Log.w("TunService task removed")
++
++        super.onTaskRemoved(rootIntent)
+     }
+ 
+     override fun onDestroy() {
+diff --git a/service/src/main/java/com/github/kr328/clash/service/clash/module/DynamicNotificationModule.kt b/service/src/main/java/com/github/kr328/clash/service/clash/module/DynamicNotificationModule.kt
+index 43aa3d6..0fd14be 100644
+--- a/service/src/main/java/com/github/kr328/clash/service/clash/module/DynamicNotificationModule.kt
++++ b/service/src/main/java/com/github/kr328/clash/service/clash/module/DynamicNotificationModule.kt
+@@ -27,6 +27,8 @@ class DynamicNotificationModule(service: Service) : Module<Unit>(service) {
+         .setSmallIcon(R.drawable.ic_logo_service)
+         .setOngoing(true)
+         .setColor(service.getColorCompat(R.color.color_clash))
++        .setCategory(NotificationCompat.CATEGORY_SERVICE)
++        .setPriority(NotificationCompat.PRIORITY_HIGH)
+         .setOnlyAlertOnce(true)
+         .setShowWhen(false)
+         .setContentTitle("Not Selected")
+@@ -105,4 +107,4 @@ class DynamicNotificationModule(service: Service) : Module<Unit>(service) {
+             }
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/service/src/main/java/com/github/kr328/clash/service/clash/module/StaticNotificationModule.kt b/service/src/main/java/com/github/kr328/clash/service/clash/module/StaticNotificationModule.kt
+index 962ba1d..1fa4196 100644
+--- a/service/src/main/java/com/github/kr328/clash/service/clash/module/StaticNotificationModule.kt
++++ b/service/src/main/java/com/github/kr328/clash/service/clash/module/StaticNotificationModule.kt
+@@ -20,6 +20,8 @@ class StaticNotificationModule(service: Service) : Module<Unit>(service) {
+         .setSmallIcon(R.drawable.ic_logo_service)
+         .setOngoing(true)
+         .setColor(service.getColorCompat(R.color.color_clash))
++        .setCategory(NotificationCompat.CATEGORY_SERVICE)
++        .setPriority(NotificationCompat.PRIORITY_HIGH)
+         .setOnlyAlertOnce(true)
+         .setShowWhen(false)
+         .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+@@ -70,6 +72,8 @@ class StaticNotificationModule(service: Service) : Module<Unit>(service) {
+                     .setSmallIcon(R.drawable.ic_logo_service)
+                     .setOngoing(true)
+                     .setColor(service.getColorCompat(R.color.color_clash))
++                    .setCategory(NotificationCompat.CATEGORY_SERVICE)
++                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                     .setOnlyAlertOnce(true)
+                     .setShowWhen(false)
+                     .setContentTitle(service.getText(R.string.loading))
+@@ -78,4 +82,4 @@ class StaticNotificationModule(service: Service) : Module<Unit>(service) {
+             service.startForegroundCompat(R.id.nf_clash_status, notification)
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/service/src/main/java/com/github/kr328/clash/service/clash/module/SuspendModule.kt b/service/src/main/java/com/github/kr328/clash/service/clash/module/SuspendModule.kt
+index 87f50d9..63a33aa 100644
+--- a/service/src/main/java/com/github/kr328/clash/service/clash/module/SuspendModule.kt
++++ b/service/src/main/java/com/github/kr328/clash/service/clash/module/SuspendModule.kt
+@@ -11,10 +11,21 @@ import kotlinx.coroutines.channels.Channel
+ import kotlinx.coroutines.withContext
+ 
+ class SuspendModule(service: Service) : Module<Unit>(service) {
++    private val isDeviceIdleMode: Boolean
++        get() = service.getSystemService<PowerManager>()?.isDeviceIdleMode ?: false
++
++    private fun updateSuspendState(interactive: Boolean) {
++        val suspended = !interactive && isDeviceIdleMode
++
++        Clash.suspendCore(suspended)
++
++        Log.d(if (suspended) "Clash suspended" else "Clash resumed")
++    }
++
+     override suspend fun run() {
+         val interactive = service.getSystemService<PowerManager>()?.isInteractive ?: true
+ 
+-        Clash.suspendCore(!interactive)
++        updateSuspendState(interactive)
+ 
+         val screenToggle = receiveBroadcast(false, Channel.CONFLATED) {
+             addAction(Intent.ACTION_SCREEN_ON)
+@@ -24,21 +35,9 @@ class SuspendModule(service: Service) : Module<Unit>(service) {
+         try {
+             while (true) {
+                 when (screenToggle.receive().action) {
+-                    Intent.ACTION_SCREEN_ON -> {
+-                        Clash.suspendCore(false)
+-
+-                        Log.d("Clash resumed")
+-                    }
+-                    Intent.ACTION_SCREEN_OFF -> {
+-                        Clash.suspendCore(true)
+-
+-                        Log.d("Clash suspended")
+-                    }
+-                    else -> {
+-                        // unreachable
+-
+-                        Clash.healthCheckAll()
+-                    }
++                    Intent.ACTION_SCREEN_ON -> updateSuspendState(true)
++                    Intent.ACTION_SCREEN_OFF -> updateSuspendState(false)
++                    else -> Clash.healthCheckAll()
+                 }
+             }
+         } finally {
+@@ -47,4 +46,4 @@ class SuspendModule(service: Service) : Module<Unit>(service) {
+             }
+         }
+     }
+-}
+\ No newline at end of file
++}
