@@ -76,7 +76,7 @@ class MainActivity : BaseActivity<MainDesign>() {
                         MainDesign.Request.OpenHelp ->
                             startActivity(HelpActivity::class.intent)
                         MainDesign.Request.OpenAbout ->
-                            design.showAbout(queryAppVersionName())
+                            design.showAbout(queryAppVersionName(), "Built at: ${com.github.kr328.clash.BuildConfig.BUILD_TIME}")
                     }
                 }
                 if (clashRunning) {

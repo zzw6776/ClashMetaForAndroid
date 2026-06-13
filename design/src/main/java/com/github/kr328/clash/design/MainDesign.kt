@@ -66,10 +66,11 @@ class MainDesign(context: Context) : Design<MainDesign.Request>(context) {
         }
     }
 
-    suspend fun showAbout(versionName: String) {
+    suspend fun showAbout(versionName: String, buildTime: String) {
         withContext(Dispatchers.Main) {
             val binding = DesignAboutBinding.inflate(context.layoutInflater).apply {
                 this.versionName = versionName
+                this.buildTime = buildTime
             }
 
             AlertDialog.Builder(context)

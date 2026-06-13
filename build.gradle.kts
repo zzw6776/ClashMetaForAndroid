@@ -3,6 +3,7 @@
 import com.android.build.gradle.AppExtension
 import com.android.build.gradle.BaseExtension
 import java.net.URL
+import java.text.SimpleDateFormat
 import java.util.*
 
 buildscript {
@@ -63,6 +64,11 @@ subprojects {
 
             resValue("string", "release_name", "v$versionName")
             resValue("integer", "release_code", "$versionCode")
+
+            val buildTime = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA).apply {
+                timeZone = TimeZone.getTimeZone("Asia/Shanghai")
+            }.format(Date())
+            buildConfigField("String", "BUILD_TIME", "\"$buildTime\"")
 
             ndk {
                 abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
