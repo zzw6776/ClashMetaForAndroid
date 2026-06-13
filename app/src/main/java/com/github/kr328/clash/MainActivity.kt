@@ -75,6 +75,8 @@ class MainActivity : BaseActivity<MainDesign>() {
                             startActivity(SettingsActivity::class.intent)
                         MainDesign.Request.OpenHelp ->
                             startActivity(HelpActivity::class.intent)
+                        MainDesign.Request.OpenConnections ->
+                            startActivity(ConnectionsActivity::class.intent)
                         MainDesign.Request.OpenAbout ->
                             design.showAbout(queryAppVersionName(), "Built at: ${com.github.kr328.clash.BuildConfig.BUILD_TIME}")
                     }

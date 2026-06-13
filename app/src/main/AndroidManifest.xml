@@ -40,6 +40,13 @@
             android:value="@integer/release_code" />
 
         <activity
+            android:name=".ConnectionsActivity"
+            android:configChanges="uiMode"
+            android:exported="false"
+            android:label="@string/connections"
+            android:launchMode="singleTask" />
+
+        <activity
             android:name=".MainActivity"
             android:configChanges="uiMode"
             android:exported="true"

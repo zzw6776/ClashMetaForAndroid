@@ -23,6 +23,7 @@ class MainDesign(context: Context) : Design<MainDesign.Request>(context) {
         OpenSettings,
         OpenHelp,
         OpenAbout,
+        OpenConnections,
     }
 
     private val binding = DesignMainBinding

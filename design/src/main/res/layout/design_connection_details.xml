@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
+    <data></data>
+    <androidx.coordinatorlayout.widget.CoordinatorLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="?attr/colorSurface">
+
+        <com.google.android.material.appbar.AppBarLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/colorSurface">
+
+            <com.google.android.material.appbar.MaterialToolbar
+                android:id="@+id/toolbar"
+                android:layout_width="match_parent"
+                android:layout_height="?attr/actionBarSize"
+                app:title="Connection Details"
+                app:navigationIcon="@android:drawable/ic_menu_close_clear_cancel" />
+
+        </com.google.android.material.appbar.AppBarLayout>
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <GridLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:columnCount="2"
+                    android:rowCount="6"
+                    android:useDefaultMargins="true">
+
+                    <!-- Row 1 -->
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Destination" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_dest" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="api.telegram.org" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Port" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_port" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="443" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <!-- Row 2 -->
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Network" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_network" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="TCP" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Process" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_process" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="Telegram" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <!-- Row 3 -->
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DNS Server" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_dns" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="8.8.8.8" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Resolved IP" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_ip" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="149.154.167.99" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <!-- Row 4 -->
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="IP Country" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_country" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="US 🇺🇸" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Match Rule" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_rule" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="DomainSuffix" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <!-- Row 5 -->
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Proxy Chain" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_chain" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="US-Node-1" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Duration" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_duration" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="00:05:23" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <!-- Row 6 -->
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Upload" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_up" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="5.2 MB" android:textColor="#4CAF50" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Download" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_down" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="12.4 MB" android:textColor="#2196F3" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                </GridLayout>
+
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_close_connection"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_gravity="bottom"
+            android:layout_margin="16dp"
+            android:text="Close Connection"
+            app:backgroundTint="#F44336"
+            app:cornerRadius="8dp" />
+
+    </androidx.coordinatorlayout.widget.CoordinatorLayout>
+</layout>

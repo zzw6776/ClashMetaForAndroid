@@ -109,3 +109,9 @@ func updateProvider(completable unsafe.Pointer, pType C.c_string, name C.c_strin
 func suspend(suspended C.int) {
 	tunnel.Suspend(suspended != 0)
 }
+
+//export queryConnections
+func queryConnections() *C.char {
+	snapshot := tunnel.QueryConnections()
+	return marshalJson(snapshot)
+}

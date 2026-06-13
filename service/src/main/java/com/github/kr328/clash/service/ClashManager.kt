@@ -42,6 +42,10 @@ class ClashManager(private val context: Context) : IClashManager,
         return ProviderList(Clash.queryProviders())
     }
 
+    override fun queryConnections(): String? {
+        return Clash.queryConnections()
+    }
+
     override fun queryOverride(slot: Clash.OverrideSlot): ConfigurationOverride {
         return Clash.queryOverride(slot)
     }

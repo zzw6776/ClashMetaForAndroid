@@ -58,6 +58,21 @@ object Clash {
         Bridge.nativeNotifyTimeZoneChanged(name, offset)
     }
 
+    fun queryConnectionSnapshot(): com.github.kr328.clash.core.model.ConnectionSnapshot? {
+        val json = queryConnections() ?: return null
+        return parseConnectionSnapshot(json)
+    }
+
+    fun parseConnectionSnapshot(json: String): com.github.kr328.clash.core.model.ConnectionSnapshot? {
+        return try {
+            val parser = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            parser.decodeFromString(com.github.kr328.clash.core.model.ConnectionSnapshot.serializer(), json)
+        } catch (e: Exception) {
+            com.github.kr328.clash.common.log.Log.e("ConnectionParseError: ${e.message} for json: $json", e)
+            null
+        }
+    }
+
     fun notifyInstalledAppsChanged(uids: List<Pair<Int, String>>) {
         val uidList = uids.joinToString(separator = ",") { "${it.first}:${it.second}" }
 
@@ -127,6 +142,10 @@ object Clash {
 
     fun healthCheckAll() {
         Bridge.nativeHealthCheckAll()
+    }
+
+    fun queryConnections(): String? {
+        return Bridge.nativeQueryConnections()
     }
 
     fun patchSelector(selector: String, name: String): Boolean {
