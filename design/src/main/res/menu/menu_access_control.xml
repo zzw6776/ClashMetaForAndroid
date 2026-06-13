@@ -9,6 +9,9 @@
     <item
         android:id="@+id/select_invert"
         android:title="@string/select_invert" />
+    <item
+        android:id="@+id/select_recommended"
+        android:title="@string/select_recommended" />
 
     <item android:title="@string/filter">
         <menu>

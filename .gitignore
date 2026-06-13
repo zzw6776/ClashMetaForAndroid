@@ -64,3 +64,9 @@ google-services.json
 
 # MacOS
 .DS_Store
+
+# Debug & temp files
+diff.txt
+log.txt
+log_cmd.txt
+tmp_tombstones/

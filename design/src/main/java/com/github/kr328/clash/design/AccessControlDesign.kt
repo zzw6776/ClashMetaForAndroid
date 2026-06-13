@@ -24,6 +24,7 @@ class AccessControlDesign(
         SelectAll,
         SelectNone,
         SelectInvert,
+        SelectRecommended,
         Import,
         Export,
     }

@@ -33,6 +33,8 @@ class AccessControlMenu(
                 requests.trySend(Request.SelectNone)
             R.id.select_invert ->
                 requests.trySend(Request.SelectInvert)
+            R.id.select_recommended ->
+                requests.trySend(Request.SelectRecommended)
             R.id.system_apps -> {
                 uiStore.accessControlSystemApp = !item.isChecked
 

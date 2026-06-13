@@ -113,6 +113,7 @@
     <string name="select_all">全选</string>
     <string name="select_invert">反选</string>
     <string name="select_none">清除</string>
+    <string name="select_recommended">推荐选择</string>
     <string name="app">应用</string>
     <string name="follow_system_android_10">跟随系统 (Android 10+)</string>
     <string name="always_dark">总是暗黑模式</string>

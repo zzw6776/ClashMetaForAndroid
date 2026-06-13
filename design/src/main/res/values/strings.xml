@@ -224,6 +224,7 @@
     <string name="select_all">Select All</string>
     <string name="select_invert">Select Invert</string>
     <string name="select_none">Select None</string>
+    <string name="select_recommended">Select Recommended</string>
     <string name="import_from_clipboard">Import from Clipboard</string>
     <string name="export_to_clipboard">Export to Clipboard</string>
 

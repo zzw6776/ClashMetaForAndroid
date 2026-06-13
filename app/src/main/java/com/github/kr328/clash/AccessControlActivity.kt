@@ -86,6 +86,19 @@ class AccessControlActivity : BaseActivity<AccessControlDesign>() {
                             design.rebindAll()
                         }
 
+                        AccessControlDesign.Request.SelectRecommended -> {
+                            val recommended = withContext(Dispatchers.IO) {
+                                packageManager.getInstalledPackages(0)
+                                    .map { it.packageName }
+                                    .filter { RECOMMENDED_PACKAGES.contains(it) }
+                            }
+
+                            selected.clear()
+                            selected.addAll(recommended)
+
+                            design.rebindAll()
+                        }
+
                         AccessControlDesign.Request.Import -> {
                             val clipboard = getSystemService<ClipboardManager>()
                             val data = clipboard?.primaryClip
@@ -153,4 +166,38 @@ class AccessControlActivity : BaseActivity<AccessControlDesign>() {
         get() {
             return applicationInfo?.flags?.and(ApplicationInfo.FLAG_SYSTEM) != 0
         }
+
+    companion object {
+        private val RECOMMENDED_PACKAGES = setOf(
+            "com.android.vending",
+            "com.google.android.gms",
+            "com.google.android.gsf",
+            "com.google.android.youtube",
+            "app.revanced.android.youtube",
+            "com.google.android.apps.maps",
+            "com.google.android.apps.photos",
+            "com.google.android.apps.authenticator2",
+            "org.telegram.messenger",
+            "org.telegram.messenger.web",
+            "org.telegram.plus",
+            "com.whatsapp",
+            "com.twitter.android",
+            "com.instagram.android",
+            "com.facebook.katana",
+            "com.facebook.orca",
+            "com.discord",
+            "com.openai.chatgpt",
+            "com.anthropic.claude",
+            "com.netflix.mediaclient",
+            "com.spotify.music",
+            "tv.twitch.android.app",
+            "com.zhiliaoapp.musically",
+            "com.pinterest",
+            "com.reddit.frontpage",
+            "com.linecorp.bline",
+            "jp.naver.line.android",
+            "com.viber.voip",
+            "com.skype.raider"
+        )
+    }
 }

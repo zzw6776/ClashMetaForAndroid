@@ -92,8 +92,9 @@ class DynamicNotificationModule(service: Service) : Module<Unit>(service) {
         }
 
         launch {
+            val pm = service.getSystemService<PowerManager>()
             while (true) {
-                if (interactive)
+                if (pm?.isInteractive != false)
                     update()
 
                 delay(TimeUnit.SECONDS.toMillis(1))
