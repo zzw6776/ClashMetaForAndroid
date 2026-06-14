@@ -2,17 +2,24 @@
 <layout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools">
-    <data></data>
+    <data>
+        <variable
+            name="self"
+            type="com.github.kr328.clash.design.ConnectionsDesign" />
+    </data>
     <androidx.coordinatorlayout.widget.CoordinatorLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="?attr/colorSurface">
+        android:background="?attr/colorSurface"
+        android:paddingStart="@{self.surface.insets.start}"
+        android:paddingEnd="@{self.surface.insets.end}">
 
         <com.google.android.material.appbar.AppBarLayout
             android:id="@+id/app_bar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@android:color/transparent"
+            android:paddingTop="@{self.surface.insets.top}"
             app:elevation="0dp">
 
             <com.google.android.material.appbar.CollapsingToolbarLayout
@@ -62,6 +69,15 @@
                                 android:checkable="true"
                                 android:checked="true"
                                 android:text="@string/closed" />
+
+                            <com.google.android.material.chip.Chip
+                                android:id="@+id/chip_sort"
+                                style="@style/Widget.MaterialComponents.Chip.Action"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="8dp"
+                                app:chipIcon="@drawable/ic_baseline_swap_vert"
+                                android:text="Sort: Default" />
                         </LinearLayout>
                     </HorizontalScrollView>
 
@@ -74,7 +90,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:clipToPadding="false"
-            android:paddingBottom="16dp"
+            android:paddingBottom="@{self.surface.insets.bottom}"
             app:layout_behavior="@string/appbar_scrolling_view_behavior"
             tools:listitem="@layout/adapter_connection_group" />
 

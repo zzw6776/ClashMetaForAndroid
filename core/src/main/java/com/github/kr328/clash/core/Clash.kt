@@ -148,6 +148,10 @@ object Clash {
         return Bridge.nativeQueryConnections()
     }
 
+    fun closeConnection(id: String) {
+        Bridge.nativeCloseConnection(id)
+    }
+
     fun patchSelector(selector: String, name: String): Boolean {
         return Bridge.nativePatchSelector(selector, name)
     }

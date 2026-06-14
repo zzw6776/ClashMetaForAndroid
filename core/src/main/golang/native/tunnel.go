@@ -115,3 +115,9 @@ func queryConnections() *C.char {
 	snapshot := tunnel.QueryConnections()
 	return marshalJson(snapshot)
 }
+
+//export closeConnection
+func closeConnection(id C.c_string) {
+	cId := C.GoString(id)
+	tunnel.CloseConnection(cId)
+}

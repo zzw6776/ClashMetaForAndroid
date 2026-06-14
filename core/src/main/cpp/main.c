@@ -214,6 +214,15 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeQueryConnections(JNIEnv *en
     return new_string(response);
 }
 
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeCloseConnection(JNIEnv *env, jobject thiz,
+                                                                     jstring id) {
+    TRACE_METHOD();
+
+    scoped_string _id = get_string(id);
+    closeConnection(_id);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativePatchSelector(JNIEnv *env, jobject thiz,
                                                                    jstring selector, jstring name) {

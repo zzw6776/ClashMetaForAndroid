@@ -12,7 +12,9 @@ interface IClashManager {
     fun queryProxyGroup(name: String, proxySort: ProxySort): ProxyGroup
     fun queryConfiguration(): UiConfiguration
     fun queryProviders(): ProviderList
-    fun queryConnections(): String?
+
+    fun setConnectionObserver(observer: IConnectionObserver?)
+    fun closeConnection(id: String)
 
     fun patchSelector(group: String, name: String): Boolean
 

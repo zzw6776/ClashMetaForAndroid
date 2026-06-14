@@ -7,6 +7,7 @@ import com.github.kr328.clash.core.model.*
 import com.github.kr328.clash.service.data.Selection
 import com.github.kr328.clash.service.data.SelectionDao
 import com.github.kr328.clash.service.remote.IClashManager
+import com.github.kr328.clash.service.remote.IConnectionObserver
 import com.github.kr328.clash.service.remote.ILogObserver
 import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.util.sendOverrideChanged
@@ -17,6 +18,7 @@ class ClashManager(private val context: Context) : IClashManager,
     CoroutineScope by CoroutineScope(Dispatchers.IO) {
     private val store = ServiceStore(context)
     private var logReceiver: ReceiveChannel<LogMessage>? = null
+    private var connectionObserverJob: Job? = null
 
     override fun queryTunnelState(): TunnelState {
         return Clash.queryTunnelState()
@@ -42,8 +44,79 @@ class ClashManager(private val context: Context) : IClashManager,
         return ProviderList(Clash.queryProviders())
     }
 
-    override fun queryConnections(): String? {
-        return Clash.queryConnections()
+    override fun setConnectionObserver(observer: IConnectionObserver?) {
+        synchronized(this) {
+            connectionObserverJob?.cancel()
+            connectionObserverJob = null
+
+            if (observer != null) {
+                connectionObserverJob = launch {
+                    var lastConnections = emptyMap<String, Connection>()
+                    try {
+                        while (isActive) {
+                            try {
+                                val json = Clash.queryConnections()
+                                if (json != null) {
+                                    val snapshot = Clash.parseConnectionSnapshot(json)
+                                    val currentConnections = snapshot?.connections?.associateBy { it.id } ?: emptyMap()
+                                    
+                                    val newConnections = mutableListOf<Connection>()
+                                    val removedConnections = mutableListOf<String>()
+                                    val updatedTraffics = mutableListOf<ConnectionTraffic>()
+                                    
+                                    for ((id, conn) in currentConnections) {
+                                        val last = lastConnections[id]
+                                        if (last == null) {
+                                            newConnections.add(conn)
+                                        } else {
+                                            val hasMetaChanged = conn.copy(upload = 0, download = 0) != last.copy(upload = 0, download = 0)
+                                            if (hasMetaChanged) {
+                                                newConnections.add(conn)
+                                            } else if (conn.upload != last.upload || conn.download != last.download) {
+                                                updatedTraffics.add(ConnectionTraffic(id, conn.upload, conn.download))
+                                            }
+                                        }
+                                    }
+                                    
+                                    for (id in lastConnections.keys) {
+                                        if (!currentConnections.containsKey(id)) {
+                                            removedConnections.add(id)
+                                        }
+                                    }
+                                    
+                                    val diff = ConnectionDiff(
+                                        timestamp = System.currentTimeMillis(),
+                                        totalUpload = snapshot?.uploadTotal ?: 0L,
+                                        totalDownload = snapshot?.downloadTotal ?: 0L,
+                                        newConnections = newConnections,
+                                        removedConnections = removedConnections,
+                                        updatedTraffics = updatedTraffics
+                                    )
+                                    
+                                    try {
+                                        observer.onConnectionDiff(diff)
+                                    } catch (e: Exception) {
+                                        Log.w("Failed to send connection diff via IPC", e)
+                                    }
+                                    lastConnections = currentConnections
+                                }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                Log.w("Connection observer poll error, retrying", e)
+                            }
+                            delay(1000)
+                        }
+                    } catch (e: CancellationException) {
+                        // ignore
+                    }
+                }
+            }
+        }
+    }
+
+    override fun closeConnection(id: String) {
+        Clash.closeConnection(id)
     }
 
     override fun queryOverride(slot: Clash.OverrideSlot): ConfigurationOverride {
