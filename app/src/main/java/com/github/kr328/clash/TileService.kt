@@ -25,13 +25,22 @@ class TileService : TileService() {
     override fun onClick() {
         val tile = qsTile ?: return
 
-        when (tile.state) {
-            Tile.STATE_INACTIVE -> {
-                startClashService()
-            }
-            Tile.STATE_ACTIVE -> {
-                stopClashService()
-            }
+        val wrapper = Intent(this, CollapseActivity::class.java).apply {
+            action = "com.github.kr328.clash.TOGGLE"
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                this,
+                0,
+                wrapper,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            startActivityAndCollapse(pendingIntent)
+        } else {
+            @Suppress("DEPRECATION")
+            startActivityAndCollapse(wrapper)
         }
     }
 

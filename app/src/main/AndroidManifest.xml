@@ -196,6 +196,12 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
             android:value="explanation_for_special_use"/>
         </service>
+        <activity
+            android:name=".CollapseActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen" />
+
         <service
             android:name=".TileService"
             android:exported="true"
