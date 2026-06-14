@@ -13,6 +13,10 @@ import com.github.kr328.clash.design.databinding.AdapterConnectionItemBinding
 import com.github.kr328.clash.design.util.formatBytes
 import com.github.kr328.clash.design.util.layoutInflater
 import com.google.android.material.color.MaterialColors
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.graphics.Color
 
 sealed class ConnectionItem {
     data class Group(
@@ -27,6 +31,19 @@ sealed class ConnectionItem {
         val isExpanded: Boolean
     ) : ConnectionItem()
     data class Child(val connection: Connection, val speed: String, val isActive: Boolean) : ConnectionItem()
+}
+
+private fun formatTotalTraffic(downloadText: String, uploadText: String): CharSequence {
+    val downStr = "Dn $downloadText"
+    val upStr = "Up $uploadText"
+    val builder = SpannableStringBuilder()
+    builder.append(downStr)
+    builder.setSpan(ForegroundColorSpan(Color.parseColor("#2196F3")), 0, downStr.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    builder.append("  ")
+    val start = builder.length
+    builder.append(upStr)
+    builder.setSpan(ForegroundColorSpan(Color.parseColor("#4CAF50")), start, builder.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    return builder
 }
 
 class ConnectionAdapter(
@@ -100,8 +117,7 @@ class ConnectionAdapter(
             val groupAlpha = if (item.activeCount == 0) 0.55f else 1f
             binding.appName.text = "${item.appName} · ${item.activeCount}/${item.totalCount}"
             binding.speed.text = item.totalSpeed
-            binding.connectionCount.text = context.getString(
-                R.string.connections_total_format,
+            binding.connectionCount.text = formatTotalTraffic(
                 formatBytes(item.totalDownload),
                 formatBytes(item.totalUpload)
             )
@@ -135,7 +151,7 @@ class ConnectionAdapter(
             binding.host.text = if (metadata.host.isNotEmpty()) "${metadata.host}:${metadata.destinationPort}" else "${metadata.destinationIP}:${metadata.destinationPort}"
             val uploadText = formatBytes(item.connection.upload)
             val downloadText = formatBytes(item.connection.download)
-            val totalText = context.getString(R.string.connections_total_format, downloadText, uploadText)
+            val totalText = formatTotalTraffic(downloadText, uploadText)
             val ruleText = formatRuleText(item.connection)
             val chainText = item.connection.chains.joinToString(" -> ")
             val infoText = listOf(ruleText, chainText)

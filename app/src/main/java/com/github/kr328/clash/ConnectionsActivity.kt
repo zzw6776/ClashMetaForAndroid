@@ -411,7 +411,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                         when (it) {
                             ConnectionsDesign.Request.Close -> finish()
                             ConnectionsDesign.Request.ClearConnections -> {
-                                clearConnectionList()
+                                clearConnectionList(resetProcessFilter = false)
                                 registerObserver(force = true)
                             }
                             ConnectionsDesign.Request.FilterChanged -> {
@@ -426,6 +426,17 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                     unregisterObserver()
                                     clearConnectionList(resetProcessFilter = false)
                                 }
+                            }
+                            ConnectionsDesign.Request.ToggleExpandCollapse -> {
+                                if (collapsedGroups.isEmpty()) {
+                                    val allGroups = connectionRecords.values.map { 
+                                        normalizeProcessName(it.connection.metadata.process) 
+                                    }.toSet()
+                                    collapsedGroups.addAll(allGroups)
+                                } else {
+                                    collapsedGroups.clear()
+                                }
+                                diffChannel.trySend(ConnectionDiff())
                             }
                         }
                     }

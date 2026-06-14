@@ -17,7 +17,8 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         FilterChanged,
         ProcessFilterClicked,
         RefreshIntervalChanged,
-        TrackingChanged
+        TrackingChanged,
+        ToggleExpandCollapse
     }
 
     enum class SortType {
@@ -64,6 +65,10 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         clearItem.setIcon(R.drawable.ic_baseline_clear_all)
         clearItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
 
+        val expandCollapseItem = binding.toolbar.menu.add(0, TOOLBAR_EXPAND_COLLAPSE_ID, 3, "展开/收起")
+        expandCollapseItem.setIcon(R.drawable.ic_baseline_unfold_more)
+        expandCollapseItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+
         binding.toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 TOOLBAR_REFRESH_ID -> {
@@ -72,6 +77,10 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
                 }
                 TOOLBAR_CLEAR_ID -> {
                     requests.trySend(Request.ClearConnections)
+                    true
+                }
+                TOOLBAR_EXPAND_COLLAPSE_ID -> {
+                    requests.trySend(Request.ToggleExpandCollapse)
                     true
                 }
                 else -> false
@@ -123,6 +132,7 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
                 uiStore.connectionSortType = sortType.ordinal
                 binding.chipSort.text = sortTypeLabel(sortType)
                 requests.trySend(Request.FilterChanged)
+                binding.recyclerView.scrollToPosition(0)
                 true
             }
             popup.show()
@@ -191,6 +201,7 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         private const val TOOLBAR_TRACKING_ID = 1
         private const val TOOLBAR_REFRESH_ID = 2
         private const val TOOLBAR_CLEAR_ID = 3
+        private const val TOOLBAR_EXPAND_COLLAPSE_ID = 4
         private val REFRESH_INTERVALS = intArrayOf(500, 1000, 2000, 5000)
 
         private fun sortTypeFromStore(value: Int): SortType {
