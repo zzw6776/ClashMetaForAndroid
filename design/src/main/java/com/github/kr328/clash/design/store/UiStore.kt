@@ -83,6 +83,11 @@ class UiStore(context: Context) {
         defaultValue = 1000
     )
 
+    var connectionTrackingEnabled: Boolean by store.boolean(
+        key = "connection_tracking_enabled",
+        defaultValue = false
+    )
+
     var connectionFilterActive: Boolean by store.boolean(
         key = "connection_filter_active",
         defaultValue = true

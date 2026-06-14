@@ -252,11 +252,12 @@
     <string name="app">App</string>
     
     <string name="connections">Connections</string>
+    <string name="connections_tracking">Tracking</string>
     <string name="active">Active</string>
     <string name="closed">Closed</string>
     <string name="connections_clear">Clear</string>
-    <string name="connections_filter_active_short">On</string>
-    <string name="connections_filter_closed_short">Off</string>
+    <string name="connections_filter_active_short">Active</string>
+    <string name="connections_filter_closed_short">Closed</string>
     <string name="connections_process_all">Process</string>
     <string name="connections_sort_format">Sort: %s</string>
     <string name="connections_sort_time_selected">Sort: Time</string>

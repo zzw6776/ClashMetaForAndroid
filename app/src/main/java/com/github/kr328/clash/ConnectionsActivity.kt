@@ -87,13 +87,15 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             return null
         }
 
-        fun connectionStartSortKey(connection: Connection): Long {
-            return parseConnectionStartMillis(connection.start) ?: Long.MAX_VALUE
+        fun connectionStartSortKey(record: ConnectionRecord): Long {
+            return record.startMillis ?: Long.MAX_VALUE
         }
 
-        fun formatDuration(start: String): String {
-            val startMillis = parseConnectionStartMillis(start) ?: return start
-            val durationSeconds = ((System.currentTimeMillis() - startMillis) / 1000).coerceAtLeast(0)
+        fun formatDuration(start: String, record: ConnectionRecord, nowMillis: Long): String {
+            val durationMillis = record.durationMillis
+                ?: record.startMillis?.let { (nowMillis - it).coerceAtLeast(0) }
+                ?: return start
+            val durationSeconds = durationMillis / 1000
             val mm = String.format(Locale.US, "%02d", (durationSeconds % 3600) / 60)
             val ss = String.format(Locale.US, "%02d", durationSeconds % 60)
             val hh = if (durationSeconds >= 3600) {
@@ -104,8 +106,19 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             return "$hh$mm:$ss"
         }
 
-        fun formatSnapshotTime(timeMillis: Long): String {
+        fun formatClockTime(timeMillis: Long): String {
             return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(timeMillis))
+        }
+
+        fun formatConnectionTimeRange(record: ConnectionRecord, nowMillis: Long): String {
+            val start = record.startMillis?.let { formatClockTime(it) } ?: record.connection.start.ifBlank { "N/A" }
+            val endMillis = record.closedMillis
+            val end = if (endMillis != null) {
+                formatClockTime(endMillis)
+            } else {
+                formatClockTime(nowMillis)
+            }
+            return "$start - $end"
         }
 
         fun boundedTrafficDelta(delta: Long): Long {
@@ -131,15 +144,25 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             }
         }
 
-        fun markConnectionClosed(id: String, connection: Connection? = null) {
+        fun markConnectionClosed(id: String, connection: Connection? = null, closedAtMillis: Long = System.currentTimeMillis()) {
             val record = connectionRecords[id]
             if (record != null) {
                 if (connection != null) {
                     record.connection = connection
+                    val parsedStartMillis = parseConnectionStartMillis(connection.start)
+                    if (parsedStartMillis != null || record.startMillis == null) {
+                        record.startMillis = parsedStartMillis
+                    }
                 }
-                record.closed = true
+                record.close(closedAtMillis)
             } else if (connection != null) {
-                connectionRecords[id] = ConnectionRecord(connection, closed = true)
+                val startMillis = parseConnectionStartMillis(connection.start)
+                connectionRecords[id] = ConnectionRecord(
+                    connection = connection,
+                    startMillis = startMillis
+                ).apply {
+                    close(closedAtMillis)
+                }
             } else {
                 return
             }
@@ -156,6 +179,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             val conn = record.connection
             val meta = conn.metadata
             val isClosed = record.closed
+            val nowMillis = System.currentTimeMillis()
 
             binding.tvDest.text = meta.host.ifEmpty { meta.destinationIP }
             binding.tvPort.text = meta.destinationPort
@@ -179,7 +203,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
             binding.tvRule.text = formatRuleText(conn)
             binding.tvChain.text = conn.chains.joinToString(" -> ")
-            binding.tvDuration.text = formatDuration(conn.start)
+            binding.tvDuration.text = formatDuration(conn.start, record, nowMillis)
             binding.tvSpeed.text = if (isClosed) {
                 "↓ 0 B/s  ↑ 0 B/s"
             } else {
@@ -194,7 +218,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     com.github.kr328.clash.design.R.string.active
                 }
             )
-            binding.tvSnapshotTime.text = formatSnapshotTime(System.currentTimeMillis())
+            binding.tvSnapshotTime.text = formatConnectionTimeRange(record, nowMillis)
             binding.tvMetadataType.text = meta.type.ifBlank { "N/A" }
             binding.tvSpecialProxy.text = meta.specialProxy.ifBlank { "N/A" }
             binding.tvSpecialRules.text = meta.specialRules.ifBlank { "N/A" }
@@ -246,16 +270,18 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         )
         design.setAdapter(adapter)
 
-        fun clearConnectionList() {
+        fun clearConnectionList(resetProcessFilter: Boolean = true) {
             connectionRecords.clear()
             connectionSpeeds.clear()
             connectionUploadSpeeds.clear()
             collapsedGroups.clear()
             closedConnectionIds.clear()
             closedConnectionOrder.clear()
-            selectedProcessKey = null
-            uiStore.connectionProcessFilter = ""
-            design.setProcessFilterLabel(null)
+            if (resetProcessFilter) {
+                selectedProcessKey = null
+                uiStore.connectionProcessFilter = ""
+                design.setProcessFilterLabel(null)
+            }
             adapter.submitList(emptyList())
         }
 
@@ -298,7 +324,28 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         val observerBinder = com.github.kr328.clash.service.remote.IConnectionObserverDelegate(observer)
         this.activeObserver = observerBinder
 
+        suspend fun stopObserver() {
+            if (!observerRegistered) {
+                awaitingSnapshotReconcile = false
+                return
+            }
+            withContext(NonCancellable + Dispatchers.IO) {
+                withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
+                    com.github.kr328.clash.util.withClash {
+                        setConnectionObserver(null, design.refreshIntervalMillis)
+                    }
+                }
+            }
+            observerRegistered = false
+            awaitingSnapshotReconcile = false
+        }
+
         suspend fun registerObserver(force: Boolean = false) {
+            if (!design.trackingEnabled) {
+                stopObserver()
+                return
+            }
+
             if (!force && observerRegistered) return
 
             val registered = withContext(Dispatchers.IO) {
@@ -318,15 +365,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         }
 
         suspend fun unregisterObserver() {
-            withContext(NonCancellable + Dispatchers.IO) {
-                withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
-                    com.github.kr328.clash.util.withClash {
-                        setConnectionObserver(null, design.refreshIntervalMillis)
-                    }
-                }
-            }
-            observerRegistered = false
-            awaitingSnapshotReconcile = false
+            stopObserver()
         }
 
         registerObserver(force = true)
@@ -354,15 +393,26 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             }
                             ConnectionsDesign.Request.ProcessFilterClicked -> showProcessFilterMenu()
                             ConnectionsDesign.Request.RefreshIntervalChanged -> registerObserver(force = true)
+                            ConnectionsDesign.Request.TrackingChanged -> {
+                                if (design.trackingEnabled) {
+                                    registerObserver(force = true)
+                                } else {
+                                    unregisterObserver()
+                                    clearConnectionList(resetProcessFilter = false)
+                                }
+                            }
                         }
                     }
                     diffChannel.onReceive { diff ->
+                        if (!design.trackingEnabled) return@onReceive
+
                         val filterActive = design.filterActive
                         val filterClosed = design.filterClosed
                         val sortType = design.sortType
                         val processFilter = selectedProcessKey
 
                         try {
+                            val batchMillis = System.currentTimeMillis()
                             val reconcileSnapshot = awaitingSnapshotReconcile && diff.timestamp > 0L
                             if (diff.timestamp > 0L) {
                                 awaitingSnapshotReconcile = false
@@ -376,17 +426,20 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                     connectionSpeeds[conn.id] = 0L
                                     connectionUploadSpeeds[conn.id] = 0L
                                 }
-                                connectionRecords[conn.id] = ConnectionRecord(conn, closed = false)
+                                connectionRecords[conn.id] = ConnectionRecord(
+                                    connection = conn,
+                                    startMillis = parseConnectionStartMillis(conn.start)
+                                )
                             }
 
                             val removedDetailIds = diff.removedConnectionDetails.mapTo(mutableSetOf()) { it.id }
                             for (conn in diff.removedConnectionDetails) {
-                                markConnectionClosed(conn.id, conn)
+                                markConnectionClosed(conn.id, conn, batchMillis)
                             }
 
                             for (id in diff.removedConnections) {
                                 if (id !in removedDetailIds) {
-                                    markConnectionClosed(id)
+                                    markConnectionClosed(id, closedAtMillis = batchMillis)
                                 }
                             }
 
@@ -396,7 +449,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                     .filter { (id, record) -> !record.closed && id !in activeIds }
                                     .keys
                                     .toList()
-                                    .forEach { id -> markConnectionClosed(id) }
+                                    .forEach { id -> markConnectionClosed(id, closedAtMillis = batchMillis) }
                             }
                             pruneClosedConnections()
 
@@ -405,7 +458,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
                                 val record = connectionRecords[traffic.id]
                                 val prevConn = record?.connection
-                                if (record != null && prevConn != null) {
+                                if (record != null && prevConn != null && !record.closed) {
                                     connectionSpeeds[traffic.id] = boundedTrafficDelta(traffic.download - prevConn.download)
                                     connectionUploadSpeeds[traffic.id] = boundedTrafficDelta(traffic.upload - prevConn.upload)
                                     record.connection = prevConn.copy(download = traffic.download, upload = traffic.upload)
@@ -426,8 +479,8 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             val sortedGrouped = grouped.entries.sortedWith { a, b ->
                                 when (sortType) {
                                     ConnectionsDesign.SortType.TIME -> {
-                                        val timeA = a.value.minOfOrNull { connectionStartSortKey(it.connection) } ?: Long.MAX_VALUE
-                                        val timeB = b.value.minOfOrNull { connectionStartSortKey(it.connection) } ?: Long.MAX_VALUE
+                                        val timeA = a.value.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
+                                        val timeB = b.value.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
                                         timeA.compareTo(timeB).takeIf { it != 0 } ?: a.key.compareTo(b.key, ignoreCase = true)
                                     }
                                     ConnectionsDesign.SortType.NAME -> {
@@ -464,7 +517,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                     val connB = b.connection
                                     when (sortType) {
                                         ConnectionsDesign.SortType.TIME -> {
-                                            val timeCompare = connectionStartSortKey(connA).compareTo(connectionStartSortKey(connB))
+                                            val timeCompare = connectionStartSortKey(a).compareTo(connectionStartSortKey(b))
                                             if (timeCompare != 0) {
                                                 timeCompare
                                             } else {
@@ -561,8 +614,20 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
     private data class ConnectionRecord(
         var connection: Connection,
-        var closed: Boolean
-    )
+        var startMillis: Long?,
+        var closedMillis: Long? = null,
+        var durationMillis: Long? = null
+    ) {
+        val closed: Boolean
+            get() = closedMillis != null
+
+        fun close(closedAtMillis: Long) {
+            if (closedMillis != null) return
+
+            closedMillis = closedAtMillis
+            durationMillis = startMillis?.let { (closedAtMillis - it).coerceAtLeast(0) }
+        }
+    }
 
     companion object {
         private const val UNKNOWN_PACKAGE = "Unknown"

@@ -8,6 +8,7 @@ import com.github.kr328.clash.design.databinding.DesignConnectionsBinding
 import com.github.kr328.clash.design.store.UiStore
 import com.github.kr328.clash.design.util.layoutInflater
 import com.github.kr328.clash.design.util.root
+import com.google.android.material.switchmaterial.SwitchMaterial
 
 class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design<ConnectionsDesign.Request>(context) {
     enum class Request {
@@ -15,7 +16,8 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         ClearConnections,
         FilterChanged,
         ProcessFilterClicked,
-        RefreshIntervalChanged
+        RefreshIntervalChanged,
+        TrackingChanged
     }
 
     enum class SortType {
@@ -23,6 +25,10 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
     }
 
     val binding = DesignConnectionsBinding.inflate(context.layoutInflater, context.root, false)
+    private val trackingSwitch = SwitchMaterial(context).apply {
+        text = null
+        contentDescription = context.getString(R.string.connections_tracking)
+    }
 
     var sortType: SortType = sortTypeFromStore(uiStore.connectionSortType)
         private set
@@ -36,6 +42,9 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
     val refreshIntervalMillis: Long
         get() = uiStore.connectionRefreshIntervalMillis.toLong()
 
+    val trackingEnabled: Boolean
+        get() = trackingSwitch.isChecked
+
     override val root: View
         get() = binding.root
 
@@ -44,10 +53,14 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         binding.toolbar.setNavigationOnClickListener {
             requests.trySend(Request.Close)
         }
-        val refreshItem = binding.toolbar.menu.add(0, TOOLBAR_REFRESH_ID, 0, refreshIntervalShortLabel(uiStore.connectionRefreshIntervalMillis))
+        val trackingItem = binding.toolbar.menu.add(0, TOOLBAR_TRACKING_ID, 0, context.getString(R.string.connections_tracking))
+        trackingItem.actionView = trackingSwitch
+        trackingItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+
+        val refreshItem = binding.toolbar.menu.add(0, TOOLBAR_REFRESH_ID, 1, refreshIntervalShortLabel(uiStore.connectionRefreshIntervalMillis))
         refreshItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS or MenuItem.SHOW_AS_ACTION_WITH_TEXT)
 
-        val clearItem = binding.toolbar.menu.add(0, TOOLBAR_CLEAR_ID, 1, context.getString(R.string.connections_clear))
+        val clearItem = binding.toolbar.menu.add(0, TOOLBAR_CLEAR_ID, 2, context.getString(R.string.connections_clear))
         clearItem.setIcon(R.drawable.ic_baseline_clear_all)
         clearItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
 
@@ -66,9 +79,17 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         }
         binding.recyclerView.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(context)
 
+        trackingSwitch.isChecked = uiStore.connectionTrackingEnabled
         binding.chipActive.isChecked = uiStore.connectionFilterActive
         binding.chipClosed.isChecked = uiStore.connectionFilterClosed
         binding.chipSort.text = sortTypeLabel(sortType)
+        setTrackingControlsEnabled(trackingSwitch.isChecked)
+
+        trackingSwitch.setOnCheckedChangeListener { _, checked ->
+            uiStore.connectionTrackingEnabled = checked
+            setTrackingControlsEnabled(checked)
+            requests.trySend(Request.TrackingChanged)
+        }
 
         binding.chipActive.setOnCheckedChangeListener { _, _ ->
             uiStore.connectionFilterActive = binding.chipActive.isChecked
@@ -116,6 +137,13 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         binding.recyclerView.adapter = adapter
     }
 
+    private fun setTrackingControlsEnabled(enabled: Boolean) {
+        binding.chipActive.isEnabled = enabled
+        binding.chipClosed.isEnabled = enabled
+        binding.chipProcess.isEnabled = enabled
+        binding.chipSort.isEnabled = enabled
+    }
+
     private fun showRefreshMenu(anchor: View, refreshItem: MenuItem) {
         val popup = PopupMenu(context, anchor)
         REFRESH_INTERVALS.forEachIndexed { index, interval ->
@@ -160,8 +188,9 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
     }
 
     companion object {
-        private const val TOOLBAR_REFRESH_ID = 1
-        private const val TOOLBAR_CLEAR_ID = 2
+        private const val TOOLBAR_TRACKING_ID = 1
+        private const val TOOLBAR_REFRESH_ID = 2
+        private const val TOOLBAR_CLEAR_ID = 3
         private val REFRESH_INTERVALS = intArrayOf(500, 1000, 2000, 5000)
 
         private fun sortTypeFromStore(value: Int): SortType {

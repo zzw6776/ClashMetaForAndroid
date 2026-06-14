@@ -116,11 +116,12 @@
     <string name="select_recommended">推荐选择</string>
     <string name="app">应用</string>
     <string name="connections">连接</string>
+    <string name="connections_tracking">连接统计</string>
     <string name="active">活跃</string>
     <string name="closed">已关闭</string>
     <string name="connections_clear">清空</string>
-    <string name="connections_filter_active_short">开</string>
-    <string name="connections_filter_closed_short">关</string>
+    <string name="connections_filter_active_short">活跃</string>
+    <string name="connections_filter_closed_short">已关闭</string>
     <string name="connections_process_all">进程</string>
     <string name="connections_sort_format">排序：%s</string>
     <string name="connections_sort_time_selected">排序：时间</string>

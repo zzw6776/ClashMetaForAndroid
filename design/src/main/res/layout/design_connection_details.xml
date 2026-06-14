@@ -116,15 +116,15 @@
                         <TextView android:id="@+id/tv_chain" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="US-Node-1" android:textStyle="bold"/>
                     </LinearLayout>
 
-                    <!-- Row 7: Status / Snapshot Time -->
+                    <!-- Row 7: Status / Time Range -->
                     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
                         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Status" android:textAppearance="?attr/textAppearanceCaption" />
                         <TextView android:id="@+id/tv_status" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="Active" android:textStyle="bold"/>
                     </LinearLayout>
 
                     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Snapshot Time" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_snapshot_time" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="12:30:45" android:textStyle="bold"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Time Range" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_snapshot_time" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="12:30:45 - 12:36:08" android:textStyle="bold"/>
                     </LinearLayout>
 
                     <!-- Row 8: Speed (Full Width) -->
