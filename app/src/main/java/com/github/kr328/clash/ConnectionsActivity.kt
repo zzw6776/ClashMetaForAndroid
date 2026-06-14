@@ -43,6 +43,8 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         var selectedProcessKey: String? = uiStore.connectionProcessFilter.takeIf { it.isNotBlank() }
         var detailsBinding: DesignConnectionDetailsBinding? = null
         var detailsConnectionId: String? = null
+        val clockTimeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        lateinit var refreshConnectionList: () -> Unit
 
         fun normalizeProcessName(process: String?): String {
             return process?.substringBefore(":")?.takeIf { it.isNotBlank() } ?: UNKNOWN_PACKAGE
@@ -107,7 +109,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         }
 
         fun formatClockTime(timeMillis: Long): String {
-            return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(timeMillis))
+            return clockTimeFormat.format(Date(timeMillis))
         }
 
         fun formatConnectionTimeRange(record: ConnectionRecord, nowMillis: Long): String {
@@ -235,7 +237,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 } else {
                     collapsedGroups.add(packageName)
                 }
-                diffChannel.trySend(ConnectionDiff())
+                refreshConnectionList()
             },
             onClick = { conn ->
                 val binding = DesignConnectionDetailsBinding.inflate(layoutInflater)
@@ -296,6 +298,153 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         )
         design.setAdapter(adapter)
 
+        refreshConnectionList = {
+            try {
+                val filterActive = design.filterActive
+                val filterClosed = design.filterClosed
+                val sortType = design.sortType
+                val processFilter = selectedProcessKey
+
+                val allDisplayRecords = connectionRecords.values.filter { record ->
+                    if (!record.closed && !filterActive) return@filter false
+                    if (record.closed && !filterClosed) return@filter false
+                    if (processFilter != null && normalizeProcessName(record.connection.metadata.process) != processFilter) return@filter false
+                    true
+                }
+
+                val grouped = allDisplayRecords.groupBy {
+                    normalizeProcessName(it.connection.metadata.process)
+                }
+
+                val sortedGrouped = grouped.entries.sortedWith { a, b ->
+                    when (sortType) {
+                        ConnectionsDesign.SortType.TIME -> {
+                            val timeA = a.value.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
+                            val timeB = b.value.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
+                            timeA.compareTo(timeB).takeIf { it != 0 } ?: a.key.compareTo(b.key, ignoreCase = true)
+                        }
+                        ConnectionsDesign.SortType.NAME -> {
+                            a.key.compareTo(b.key, ignoreCase = true)
+                        }
+                        ConnectionsDesign.SortType.SPEED_DOWN -> {
+                            val sumA = a.value.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
+                            val sumB = b.value.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
+                            sumB.compareTo(sumA)
+                        }
+                        ConnectionsDesign.SortType.SPEED_UP -> {
+                            val sumA = a.value.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
+                            val sumB = b.value.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
+                            sumB.compareTo(sumA)
+                        }
+                        ConnectionsDesign.SortType.TRAFFIC_DOWN -> {
+                            val sumA = a.value.sumOf { it.connection.download }
+                            val sumB = b.value.sumOf { it.connection.download }
+                            sumB.compareTo(sumA)
+                        }
+                        ConnectionsDesign.SortType.TRAFFIC_UP -> {
+                            val sumA = a.value.sumOf { it.connection.upload }
+                            val sumB = b.value.sumOf { it.connection.upload }
+                            sumB.compareTo(sumA)
+                        }
+                    }
+                }
+
+                val items = mutableListOf<com.github.kr328.clash.design.adapter.ConnectionItem>()
+
+                for ((basePackage, connsUnsorted) in sortedGrouped) {
+                    val conns = connsUnsorted.sortedWith { a, b ->
+                        val connA = a.connection
+                        val connB = b.connection
+                        when (sortType) {
+                            ConnectionsDesign.SortType.TIME -> {
+                                val timeCompare = connectionStartSortKey(a).compareTo(connectionStartSortKey(b))
+                                if (timeCompare != 0) {
+                                    timeCompare
+                                } else {
+                                    val nameA = connA.metadata.host.ifEmpty { connA.metadata.destinationIP }
+                                    val nameB = connB.metadata.host.ifEmpty { connB.metadata.destinationIP }
+                                    nameA.compareTo(nameB, ignoreCase = true)
+                                }
+                            }
+                            ConnectionsDesign.SortType.NAME -> {
+                                val nameA = connA.metadata.host.ifEmpty { connA.metadata.destinationIP }
+                                val nameB = connB.metadata.host.ifEmpty { connB.metadata.destinationIP }
+                                nameA.compareTo(nameB, ignoreCase = true)
+                            }
+                            ConnectionsDesign.SortType.SPEED_DOWN -> {
+                                val speedA = connectionSpeeds[connA.id] ?: 0L
+                                val speedB = connectionSpeeds[connB.id] ?: 0L
+                                speedB.compareTo(speedA)
+                            }
+                            ConnectionsDesign.SortType.SPEED_UP -> {
+                                val speedA = connectionUploadSpeeds[connA.id] ?: 0L
+                                val speedB = connectionUploadSpeeds[connB.id] ?: 0L
+                                speedB.compareTo(speedA)
+                            }
+                            ConnectionsDesign.SortType.TRAFFIC_DOWN -> connB.download.compareTo(connA.download)
+                            ConnectionsDesign.SortType.TRAFFIC_UP -> connB.upload.compareTo(connA.upload)
+                        }
+                    }
+
+                    val activeCount = conns.count { !it.closed }
+                    val appName = resolveAppName(basePackage)
+                    val appIcon = packageIcons.getOrPut("icon_$basePackage") {
+                        try {
+                            packageManager.getApplicationIcon(basePackage)
+                        } catch (e: Exception) {
+                            androidx.core.content.ContextCompat.getDrawable(
+                                this@ConnectionsActivity,
+                                android.R.mipmap.sym_def_app_icon
+                            ) ?: androidx.core.content.ContextCompat.getDrawable(
+                                this@ConnectionsActivity,
+                                android.R.drawable.sym_def_app_icon
+                            )
+                        }
+                    }
+
+                    val totalSpeedBytes = conns.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
+                    val totalUploadSpeedBytes = conns.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
+                    val totalSpeed = "↓ ${formatTraffic(totalSpeedBytes)}  ↑ ${formatTraffic(totalUploadSpeedBytes)}"
+                    val totalUploadBytes = conns.sumOf { it.connection.upload }
+                    val totalDownloadBytes = conns.sumOf { it.connection.download }
+
+                    val isExpanded = !collapsedGroups.contains(basePackage)
+                    items.add(
+                        com.github.kr328.clash.design.adapter.ConnectionItem.Group(
+                            packageName = basePackage,
+                            appName = appName,
+                            appIcon = appIcon,
+                            activeCount = activeCount,
+                            totalCount = conns.size,
+                            totalSpeed = totalSpeed,
+                            totalUpload = totalUploadBytes,
+                            totalDownload = totalDownloadBytes,
+                            isExpanded = isExpanded
+                        )
+                    )
+
+                    if (isExpanded) {
+                        for (record in conns) {
+                            val conn = record.connection
+                            val speedBytes = connectionSpeeds[conn.id] ?: 0L
+                            val uploadSpeedBytes = connectionUploadSpeeds[conn.id] ?: 0L
+                            val speed = "↓ ${formatTraffic(speedBytes)}  ↑ ${formatTraffic(uploadSpeedBytes)}"
+                            items.add(com.github.kr328.clash.design.adapter.ConnectionItem.Child(conn, speed, !record.closed))
+                        }
+                    }
+                }
+
+                adapter.submitList(items)
+                detailsBinding?.let { binding ->
+                    detailsConnectionId?.let { id ->
+                        updateConnectionDetails(binding, id)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("Failed to update connections UI", e)
+            }
+        }
+
         fun clearConnectionList(resetProcessFilter: Boolean = true) {
             connectionRecords.clear()
             connectionSpeeds.clear()
@@ -336,7 +485,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 selectedProcessKey = option.first
                 uiStore.connectionProcessFilter = option.first.orEmpty()
                 design.setProcessFilterLabel(option.second)
-                diffChannel.trySend(ConnectionDiff())
+                refreshConnectionList()
                 true
             }
             popup.show()
@@ -415,7 +564,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 registerObserver(force = true)
                             }
                             ConnectionsDesign.Request.FilterChanged -> {
-                                diffChannel.trySend(ConnectionDiff())
+                                refreshConnectionList()
                             }
                             ConnectionsDesign.Request.ProcessFilterClicked -> showProcessFilterMenu()
                             ConnectionsDesign.Request.RefreshIntervalChanged -> registerObserver(force = true)
@@ -436,17 +585,12 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 } else {
                                     collapsedGroups.clear()
                                 }
-                                diffChannel.trySend(ConnectionDiff())
+                                refreshConnectionList()
                             }
                         }
                     }
                     diffChannel.onReceive { diff ->
                         if (!design.trackingEnabled) return@onReceive
-
-                        val filterActive = design.filterActive
-                        val filterClosed = design.filterClosed
-                        val sortType = design.sortType
-                        val processFilter = selectedProcessKey
 
                         try {
                             val batchMillis = System.currentTimeMillis()
@@ -490,153 +634,28 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             }
                             pruneClosedConnections()
 
+                            val updatedTrafficIds = mutableSetOf<String>()
                             for (traffic in diff.updatedTraffics) {
                                 if (traffic.id in newConnectionIds) continue
 
                                 val record = connectionRecords[traffic.id]
                                 val prevConn = record?.connection
                                 if (record != null && prevConn != null && !record.closed) {
+                                    updatedTrafficIds.add(traffic.id)
                                     connectionSpeeds[traffic.id] = boundedTrafficDelta(traffic.download - prevConn.download)
                                     connectionUploadSpeeds[traffic.id] = boundedTrafficDelta(traffic.upload - prevConn.upload)
                                     record.connection = prevConn.copy(download = traffic.download, upload = traffic.upload)
                                 }
                             }
 
-                            val allDisplayRecords = connectionRecords.values.filter { record ->
-                                if (!record.closed && !filterActive) return@filter false
-                                if (record.closed && !filterClosed) return@filter false
-                                if (processFilter != null && normalizeProcessName(record.connection.metadata.process) != processFilter) return@filter false
-                                true
-                            }
-
-                            val grouped = allDisplayRecords.groupBy {
-                                normalizeProcessName(it.connection.metadata.process)
-                            }
-
-                            val sortedGrouped = grouped.entries.sortedWith { a, b ->
-                                when (sortType) {
-                                    ConnectionsDesign.SortType.TIME -> {
-                                        val timeA = a.value.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
-                                        val timeB = b.value.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
-                                        timeA.compareTo(timeB).takeIf { it != 0 } ?: a.key.compareTo(b.key, ignoreCase = true)
-                                    }
-                                    ConnectionsDesign.SortType.NAME -> {
-                                        a.key.compareTo(b.key, ignoreCase = true)
-                                    }
-                                    ConnectionsDesign.SortType.SPEED_DOWN -> {
-                                        val sumA = a.value.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
-                                        val sumB = b.value.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
-                                        sumB.compareTo(sumA)
-                                    }
-                                    ConnectionsDesign.SortType.SPEED_UP -> {
-                                        val sumA = a.value.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
-                                        val sumB = b.value.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
-                                        sumB.compareTo(sumA)
-                                    }
-                                    ConnectionsDesign.SortType.TRAFFIC_DOWN -> {
-                                        val sumA = a.value.sumOf { it.connection.download }
-                                        val sumB = b.value.sumOf { it.connection.download }
-                                        sumB.compareTo(sumA)
-                                    }
-                                    ConnectionsDesign.SortType.TRAFFIC_UP -> {
-                                        val sumA = a.value.sumOf { it.connection.upload }
-                                        val sumB = b.value.sumOf { it.connection.upload }
-                                        sumB.compareTo(sumA)
-                                    }
+                            for ((id, record) in connectionRecords) {
+                                if (!record.closed && id !in newConnectionIds && id !in updatedTrafficIds) {
+                                    connectionSpeeds[id] = 0L
+                                    connectionUploadSpeeds[id] = 0L
                                 }
                             }
 
-                            val items = mutableListOf<com.github.kr328.clash.design.adapter.ConnectionItem>()
-
-                            for ((basePackage, connsUnsorted) in sortedGrouped) {
-                                val conns = connsUnsorted.sortedWith { a, b ->
-                                    val connA = a.connection
-                                    val connB = b.connection
-                                    when (sortType) {
-                                        ConnectionsDesign.SortType.TIME -> {
-                                            val timeCompare = connectionStartSortKey(a).compareTo(connectionStartSortKey(b))
-                                            if (timeCompare != 0) {
-                                                timeCompare
-                                            } else {
-                                                val nameA = connA.metadata.host.ifEmpty { connA.metadata.destinationIP }
-                                                val nameB = connB.metadata.host.ifEmpty { connB.metadata.destinationIP }
-                                                nameA.compareTo(nameB, ignoreCase = true)
-                                            }
-                                        }
-                                        ConnectionsDesign.SortType.NAME -> {
-                                            val nameA = connA.metadata.host.ifEmpty { connA.metadata.destinationIP }
-                                            val nameB = connB.metadata.host.ifEmpty { connB.metadata.destinationIP }
-                                            nameA.compareTo(nameB, ignoreCase = true)
-                                        }
-                                        ConnectionsDesign.SortType.SPEED_DOWN -> {
-                                            val speedA = connectionSpeeds[connA.id] ?: 0L
-                                            val speedB = connectionSpeeds[connB.id] ?: 0L
-                                            speedB.compareTo(speedA)
-                                        }
-                                        ConnectionsDesign.SortType.SPEED_UP -> {
-                                            val speedA = connectionUploadSpeeds[connA.id] ?: 0L
-                                            val speedB = connectionUploadSpeeds[connB.id] ?: 0L
-                                            speedB.compareTo(speedA)
-                                        }
-                                        ConnectionsDesign.SortType.TRAFFIC_DOWN -> connB.download.compareTo(connA.download)
-                                        ConnectionsDesign.SortType.TRAFFIC_UP -> connB.upload.compareTo(connA.upload)
-                                    }
-                                }
-
-                                val activeCount = conns.count { !it.closed }
-                                val appName = resolveAppName(basePackage)
-                                val appIcon = packageIcons.getOrPut("icon_$basePackage") {
-                                    try {
-                                        packageManager.getApplicationIcon(basePackage)
-                                    } catch (e: Exception) {
-                                        androidx.core.content.ContextCompat.getDrawable(
-                                            this@ConnectionsActivity,
-                                            android.R.mipmap.sym_def_app_icon
-                                        ) ?: androidx.core.content.ContextCompat.getDrawable(
-                                            this@ConnectionsActivity,
-                                            android.R.drawable.sym_def_app_icon
-                                        )
-                                    }
-                                }
-
-                                val totalSpeedBytes = conns.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
-                                val totalUploadSpeedBytes = conns.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
-                                val totalSpeed = "↓ ${formatTraffic(totalSpeedBytes)}  ↑ ${formatTraffic(totalUploadSpeedBytes)}"
-                                val totalUploadBytes = conns.sumOf { it.connection.upload }
-                                val totalDownloadBytes = conns.sumOf { it.connection.download }
-
-                                val isExpanded = !collapsedGroups.contains(basePackage)
-                                items.add(
-                                    com.github.kr328.clash.design.adapter.ConnectionItem.Group(
-                                        packageName = basePackage,
-                                        appName = appName,
-                                        appIcon = appIcon,
-                                        activeCount = activeCount,
-                                        totalCount = conns.size,
-                                        totalSpeed = totalSpeed,
-                                        totalUpload = totalUploadBytes,
-                                        totalDownload = totalDownloadBytes,
-                                        isExpanded = isExpanded
-                                    )
-                                )
-
-                                if (isExpanded) {
-                                    for (record in conns) {
-                                        val conn = record.connection
-                                        val speedBytes = connectionSpeeds[conn.id] ?: 0L
-                                        val uploadSpeedBytes = connectionUploadSpeeds[conn.id] ?: 0L
-                                        val speed = "↓ ${formatTraffic(speedBytes)}  ↑ ${formatTraffic(uploadSpeedBytes)}"
-                                        items.add(com.github.kr328.clash.design.adapter.ConnectionItem.Child(conn, speed, !record.closed))
-                                    }
-                                }
-                            }
-
-                            adapter.submitList(items)
-                            detailsBinding?.let { binding ->
-                                detailsConnectionId?.let { id ->
-                                    updateConnectionDetails(binding, id)
-                                }
-                            }
+                            refreshConnectionList()
                         } catch (e: Exception) {
                             Log.w("Failed to update connections UI", e)
                         }

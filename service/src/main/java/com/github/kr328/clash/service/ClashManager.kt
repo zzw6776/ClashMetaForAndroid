@@ -53,6 +53,7 @@ class ClashManager(private val context: Context) : IClashManager,
                 val pollInterval = intervalMillis.coerceIn(500L, 5000L)
                 connectionObserverJob = launch {
                     var lastConnections = emptyMap<String, Connection>()
+                    var activeTrafficIds = emptySet<String>()
                     try {
                         while (isActive) {
                             try {
@@ -65,32 +66,20 @@ class ClashManager(private val context: Context) : IClashManager,
                                     val removedConnections = mutableListOf<String>()
                                     val removedConnectionDetails = mutableListOf<Connection>()
                                     val updatedTraffics = mutableListOf<ConnectionTraffic>()
+                                    val changedTrafficIds = mutableSetOf<String>()
                                     
                                     for ((id, conn) in currentConnections) {
                                         val last = lastConnections[id]
-                                        val chainText = conn.chains.joinToString(" -> ")
-                                        if (conn.rule.isBlank() && conn.chains.isNotEmpty() && last?.rule != conn.rule) {
-                                            Log.d(
-                                                "ConnectionRuleTrace blank-rule id=$id host=${conn.metadata.host} " +
-                                                    "ip=${conn.metadata.destinationIP} chain=$chainText type=${conn.metadata.type} " +
-                                                    "specialProxy=${conn.metadata.specialProxy} specialRules=${conn.metadata.specialRules}"
-                                            )
-                                        }
-                                        if (last != null && (last.rule != conn.rule || last.rulePayload != conn.rulePayload)) {
-                                            Log.d(
-                                                "ConnectionRuleTrace rule-change id=$id host=${conn.metadata.host} " +
-                                                    "ip=${conn.metadata.destinationIP} old=${last.rule}/${last.rulePayload} " +
-                                                    "new=${conn.rule}/${conn.rulePayload} chain=$chainText type=${conn.metadata.type} " +
-                                                    "specialProxy=${conn.metadata.specialProxy} specialRules=${conn.metadata.specialRules}"
-                                            )
-                                        }
                                         if (last == null) {
                                             newConnections.add(conn)
                                         } else {
                                             val hasMetaChanged = conn.copy(upload = 0, download = 0) != last.copy(upload = 0, download = 0)
                                             if (hasMetaChanged) {
                                                 newConnections.add(conn)
-                                            } else {
+                                            } else if (conn.upload != last.upload || conn.download != last.download) {
+                                                updatedTraffics.add(ConnectionTraffic(id, conn.upload, conn.download))
+                                                changedTrafficIds.add(id)
+                                            } else if (id in activeTrafficIds) {
                                                 updatedTraffics.add(ConnectionTraffic(id, conn.upload, conn.download))
                                             }
                                         }
@@ -103,22 +92,30 @@ class ClashManager(private val context: Context) : IClashManager,
                                         }
                                     }
                                     
-                                    val diff = ConnectionDiff(
-                                        timestamp = System.currentTimeMillis(),
-                                        totalUpload = snapshot?.uploadTotal ?: 0L,
-                                        totalDownload = snapshot?.downloadTotal ?: 0L,
-                                        newConnections = newConnections,
-                                        removedConnections = removedConnections,
-                                        removedConnectionDetails = removedConnectionDetails,
-                                        updatedTraffics = updatedTraffics
-                                    )
-                                    
-                                    try {
-                                        observer.onConnectionDiff(diff)
-                                    } catch (e: Exception) {
-                                        Log.w("Failed to send connection diff via IPC", e)
+                                    if (
+                                        newConnections.isNotEmpty() ||
+                                        removedConnections.isNotEmpty() ||
+                                        removedConnectionDetails.isNotEmpty() ||
+                                        updatedTraffics.isNotEmpty()
+                                    ) {
+                                        val diff = ConnectionDiff(
+                                            timestamp = System.currentTimeMillis(),
+                                            totalUpload = snapshot?.uploadTotal ?: 0L,
+                                            totalDownload = snapshot?.downloadTotal ?: 0L,
+                                            newConnections = newConnections,
+                                            removedConnections = removedConnections,
+                                            removedConnectionDetails = removedConnectionDetails,
+                                            updatedTraffics = updatedTraffics
+                                        )
+
+                                        try {
+                                            observer.onConnectionDiff(diff)
+                                        } catch (e: Exception) {
+                                            Log.w("Failed to send connection diff via IPC", e)
+                                        }
                                     }
                                     lastConnections = currentConnections
+                                    activeTrafficIds = changedTrafficIds
                                 }
                             } catch (e: CancellationException) {
                                 throw e
