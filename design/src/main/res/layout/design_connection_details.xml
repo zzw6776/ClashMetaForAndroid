@@ -41,137 +41,256 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="12dp">
 
-                <GridLayout
+                <!-- Card 1: Target Info -->
+                <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:columnCount="2"
-                    android:rowCount="11"
-                    android:useDefaultMargins="true">
+                    android:layout_marginBottom="12dp"
+                    app:cardElevation="2dp"
+                    app:cardCornerRadius="8dp">
 
-                    <!-- Row 1: Destination / Port -->
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Destination" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_dest" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="api.telegram.org" android:textStyle="bold"/>
-                    </LinearLayout>
-
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Port" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_port" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="443" android:textStyle="bold"/>
-                    </LinearLayout>
-
-                    <!-- Row 2: Network / Process -->
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Network" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_network" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="TCP" android:textStyle="bold"/>
-                    </LinearLayout>
-
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Process" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_process" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="Telegram" android:textStyle="bold"/>
-                    </LinearLayout>
-
-                    <!-- Row 3: DNS Server / DNS Mode -->
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DNS Server" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_dns" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="8.8.8.8" android:textStyle="bold"/>
-                    </LinearLayout>
-
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DNS Mode" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_dns_mode" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="fake-ip" android:textStyle="bold"/>
-                    </LinearLayout>
-
-                    <!-- Row 4: Resolved IP / IP Country -->
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Resolved IP" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_ip" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="149.154.167.99" android:textStyle="bold"/>
-                    </LinearLayout>
-
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="IP Country" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_country" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="US 🇺🇸" android:textStyle="bold"/>
-                    </LinearLayout>
-
-                    <!-- Row 5: Match Rule / Duration -->
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Match Rule" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_rule" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="DomainSuffix" android:textStyle="bold"/>
-                    </LinearLayout>
-
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Duration" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_duration" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="00:05:23" android:textStyle="bold"/>
-                    </LinearLayout>
-
-                    <!-- Row 6: Proxy Chain (Full Width) -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_columnSpan="2"
                         android:orientation="vertical"
-                        android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Proxy Chain" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_chain" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="US-Node-1" android:textStyle="bold"/>
-                    </LinearLayout>
+                        android:padding="12dp">
 
-                    <!-- Row 7: Status / Time Range -->
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Status" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_status" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="Active" android:textStyle="bold"/>
-                    </LinearLayout>
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Target Info"
+                            android:textAppearance="?attr/textAppearanceSubtitle2"
+                            android:textColor="?attr/colorPrimary"
+                            android:layout_marginBottom="8dp"/>
 
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Time Range" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_snapshot_time" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="12:30:45 - 12:36:08" android:textStyle="bold"/>
-                    </LinearLayout>
+                        <GridLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:columnCount="2"
+                            android:useDefaultMargins="false">
 
-                    <!-- Row 8: Speed (Full Width) -->
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_columnSpan="2" android:orientation="vertical" android:layout_marginBottom="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Destination" android:textAppearance="?attr/textAppearanceCaption" />
+                                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                                    <TextView android:id="@+id/tv_dest" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="api.telegram.org" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text=":" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" />
+                                    <TextView android:id="@+id/tv_port" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" tools:text="443" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                                </LinearLayout>
+                            </LinearLayout>
+
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginEnd="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Process" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_process" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="Telegram" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Network" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_network" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="TCP" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+
+                        </GridLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Card 2: Routing -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    app:cardElevation="2dp"
+                    app:cardCornerRadius="8dp">
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_columnSpan="2"
                         android:orientation="vertical"
-                        android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_speed" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="↓ 3.7 KB/s ↑ 5.9 KB/s" android:textStyle="bold"/>
-                    </LinearLayout>
+                        android:padding="12dp">
 
-                    <!-- Row 9: Metadata Type / Special Proxy -->
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Metadata Type" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_metadata_type" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="INNER" android:textStyle="bold"/>
-                    </LinearLayout>
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Routing"
+                            android:textAppearance="?attr/textAppearanceSubtitle2"
+                            android:textColor="?attr/colorPrimary"
+                            android:layout_marginBottom="8dp"/>
 
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Special Proxy" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_special_proxy" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="DIRECT" android:textStyle="bold"/>
-                    </LinearLayout>
+                        <GridLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:columnCount="2"
+                            android:useDefaultMargins="false">
 
-                    <!-- Row 10: Special Rules (Full Width) -->
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginEnd="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Match Rule" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_rule" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="DomainSuffix" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Proxy Chain" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_chain" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="US-Node-1" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+
+                        </GridLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Card 3: DNS & IP -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    app:cardElevation="2dp"
+                    app:cardCornerRadius="8dp">
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_columnSpan="2"
                         android:orientation="vertical"
-                        android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Special Rules" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_special_rules" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="sub-rule" android:textStyle="bold"/>
-                    </LinearLayout>
+                        android:padding="12dp">
 
-                    <!-- Row 11: Upload / Download -->
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Upload" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_up" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="5.2 MB" android:textColor="#4CAF50" android:textStyle="bold"/>
-                    </LinearLayout>
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="DNS &amp; IP"
+                            android:textAppearance="?attr/textAppearanceSubtitle2"
+                            android:textColor="?attr/colorPrimary"
+                            android:layout_marginBottom="8dp"/>
 
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Download" android:textAppearance="?attr/textAppearanceCaption" />
-                        <TextView android:id="@+id/tv_down" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="12.4 MB" android:textColor="#2196F3" android:textStyle="bold"/>
-                    </LinearLayout>
+                        <!-- Row 1: Resolved IP | Mode | Country -->
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1.2" android:orientation="vertical" android:layout_marginEnd="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Resolved IP" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_ip" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="149.154.167.99" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="6sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:layout_marginEnd="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Mode" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_dns_mode" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="fake-ip" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="6sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="0.8" android:orientation="vertical">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Country" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_country" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="US 🇺🇸" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="6sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+                        </LinearLayout>
 
-                </GridLayout>
+                        <!-- Row 2: DNS Server -->
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DNS Server" android:textAppearance="?attr/textAppearanceCaption" />
+                            <TextView android:id="@+id/tv_dns" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="8.8.8.8" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:textIsSelectable="true"/>
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Card 4: Traffic & Status -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    app:cardElevation="2dp"
+                    app:cardCornerRadius="8dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Traffic &amp; Status"
+                            android:textAppearance="?attr/textAppearanceSubtitle2"
+                            android:textColor="?attr/colorPrimary"
+                            android:layout_marginBottom="8dp"/>
+
+                        <!-- Row 1: Status | Duration | Time Range -->
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="0.8" android:orientation="vertical" android:layout_marginEnd="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Status" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_status" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="Active" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:layout_marginEnd="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Duration" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_duration" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="00:05:23" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1.6" android:orientation="vertical">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Time Range" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_snapshot_time" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="12:30:45 - 12:36:08" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <!-- Row 2: Speed (left) | Spacer | Up (right) | Dn (right) -->
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                            <!-- Speed -->
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_speed" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="↓ 3.7 KB/s ↑ 5.9 KB/s" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+                            
+                            <!-- Spacer to push Up/Dn to the right -->
+                            <Space android:layout_width="16dp" android:layout_height="wrap_content" />
+
+                            <!-- Up and Dn clustered together -->
+                            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal">
+                                <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginEnd="16dp">
+                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Upload" android:textAppearance="?attr/textAppearanceCaption" />
+                                    <TextView android:id="@+id/tv_up" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="5.2 MB" android:textColor="#4CAF50" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                                </LinearLayout>
+                                <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical">
+                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Download" android:textAppearance="?attr/textAppearanceCaption" />
+                                    <TextView android:id="@+id/tv_down" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="12.4 MB" android:textColor="#2196F3" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                                </LinearLayout>
+                            </LinearLayout>
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Card 5: Advanced -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:cardElevation="2dp"
+                    app:cardCornerRadius="8dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Advanced"
+                            android:textAppearance="?attr/textAppearanceSubtitle2"
+                            android:textColor="?attr/colorPrimary"
+                            android:layout_marginBottom="8dp"/>
+
+                        <GridLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:columnCount="2"
+                            android:useDefaultMargins="false">
+
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginBottom="8dp" android:layout_marginEnd="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Metadata Type" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_metadata_type" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="INNER" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginBottom="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Special Proxy" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_special_proxy" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="DIRECT" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_columnSpan="2" android:orientation="vertical">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Special Rules" android:textAppearance="?attr/textAppearanceCaption" />
+                                <TextView android:id="@+id/tv_special_rules" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="sub-rule" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                            </LinearLayout>
+
+                        </GridLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
             </LinearLayout>
         </androidx.core.widget.NestedScrollView>
@@ -188,3 +307,4 @@
 
     </androidx.coordinatorlayout.widget.CoordinatorLayout>
 </layout>
+

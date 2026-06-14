@@ -247,6 +247,32 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 detailsConnectionId = conn.id
                 updateConnectionDetails(binding, conn.id)
 
+                val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val setupCopy = { view: android.widget.TextView, label: String ->
+                    view.setOnLongClickListener {
+                        val textToCopy = view.text?.toString() ?: ""
+                        if (textToCopy.isNotBlank() && textToCopy != "N/A" && textToCopy != "Unknown") {
+                            val clip = android.content.ClipData.newPlainText(label, textToCopy)
+                            clipboard.setPrimaryClip(clip)
+                            android.widget.Toast.makeText(this@ConnectionsActivity, "已复制: $textToCopy", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        true
+                    }
+                }
+                setupCopy(binding.tvDest, "Destination")
+                setupCopy(binding.tvPort, "Port")
+                setupCopy(binding.tvProcess, "Process")
+                setupCopy(binding.tvNetwork, "Network")
+                setupCopy(binding.tvRule, "Rule")
+                setupCopy(binding.tvChain, "Chain")
+                setupCopy(binding.tvIp, "IP")
+                setupCopy(binding.tvCountry, "Country")
+                setupCopy(binding.tvDns, "DNS")
+                setupCopy(binding.tvDnsMode, "DNS Mode")
+                setupCopy(binding.tvMetadataType, "Type")
+                setupCopy(binding.tvSpecialProxy, "Special Proxy")
+                setupCopy(binding.tvSpecialRules, "Special Rules")
+
                 binding.toolbar.setNavigationOnClickListener { dialog.dismiss() }
                 binding.btnCloseConnection.setOnClickListener {
                     this@ConnectionsActivity.launch(Dispatchers.IO) {
