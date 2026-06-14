@@ -7,3 +7,6 @@
 3. **验证策略**：代码修改后的默认验证应使用最小必要 `release` 任务，避免无必要完整打包。Kotlin/Java 改动优先运行相关模块的 `compileMetaReleaseKotlin` / `compileMetaReleaseJavaWithJavac`；资源或 XML 改动优先运行相关 `processMetaReleaseResources`；只有需要生成 APK 产物、用户明确要求打包或按第 2 条默认安装流程生成 APK 时才运行 `:app:assembleMetaRelease`；只有用户明确指定使用 Gradle install 任务时才运行 `:app:installMetaRelease`。所有 Gradle 验证命令默认附加 `"-Plocal.install.abi=arm64-v8a"`。
 
 4. **修改确认**：进行任何代码、配置或文档修改前，必须先输出修改方案并等待用户明确确认。
+
+以下为备注 可以忽略
+.\gradlew.bat :app:installMetaRelease "-Plocal.install.abi=arm64-v8a"
