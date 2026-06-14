@@ -37,6 +37,7 @@ data class ConnectionDiff(
     val totalDownload: Long = 0,
     val newConnections: List<Connection> = emptyList(),
     val removedConnections: List<String> = emptyList(),
+    val removedConnectionDetails: List<Connection> = emptyList(),
     val updatedTraffics: List<ConnectionTraffic> = emptyList()
 ) : Parcelable {
     override fun writeToParcel(parcel: Parcel, flags: Int) {

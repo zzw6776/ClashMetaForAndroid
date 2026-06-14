@@ -56,28 +56,40 @@
                                 android:id="@+id/chip_active"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginEnd="8dp"
+                                android:layout_marginEnd="6dp"
                                 android:checkable="true"
                                 android:checked="true"
-                                android:text="@string/active" />
+                                android:text="@string/connections_filter_active_short" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chip_closed"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginEnd="8dp"
+                                android:layout_marginEnd="6dp"
                                 android:checkable="true"
                                 android:checked="true"
-                                android:text="@string/closed" />
+                                android:text="@string/connections_filter_closed_short" />
+
+                            <com.google.android.material.chip.Chip
+                                android:id="@+id/chip_process"
+                                style="@style/Widget.MaterialComponents.Chip.Action"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="6dp"
+                                android:ellipsize="end"
+                                android:maxWidth="132dp"
+                                android:singleLine="true"
+                                app:chipIcon="@drawable/ic_baseline_apps"
+                                android:text="@string/connections_process_all" />
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chip_sort"
                                 style="@style/Widget.MaterialComponents.Chip.Action"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginEnd="8dp"
+                                android:layout_marginEnd="6dp"
                                 app:chipIcon="@drawable/ic_baseline_swap_vert"
-                                android:text="Sort: Default" />
+                                android:text="@string/connections_sort_time" />
                         </LinearLayout>
                     </HorizontalScrollView>
 

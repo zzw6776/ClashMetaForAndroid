@@ -78,6 +78,31 @@ class UiStore(context: Context) {
         defaultValue = false,
     )
 
+    var connectionRefreshIntervalMillis: Int by store.int(
+        key = "connection_refresh_interval_millis",
+        defaultValue = 1000
+    )
+
+    var connectionFilterActive: Boolean by store.boolean(
+        key = "connection_filter_active",
+        defaultValue = true
+    )
+
+    var connectionFilterClosed: Boolean by store.boolean(
+        key = "connection_filter_closed",
+        defaultValue = true
+    )
+
+    var connectionSortType: Int by store.int(
+        key = "connection_sort_type",
+        defaultValue = 0
+    )
+
+    var connectionProcessFilter: String by store.string(
+        key = "connection_process_filter",
+        defaultValue = ""
+    )
+
     companion object {
         private const val PREFERENCE_NAME = "ui"
 

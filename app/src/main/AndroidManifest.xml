@@ -50,8 +50,7 @@
             android:name=".MainActivity"
             android:configChanges="uiMode"
             android:exported="true"
-            android:label="@string/launch_name"
-            android:launchMode="singleTask">
+            android:label="@string/launch_name">
             <intent-filter>
                 <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
                 <action android:name="android.intent.action.MAIN" />

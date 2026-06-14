@@ -1,56 +1,207 @@
 package com.github.kr328.clash
 
-import android.content.Intent
-import com.github.kr328.clash.common.util.ticker
-import com.github.kr328.clash.core.Clash
+import com.github.kr328.clash.common.log.Log
+import com.github.kr328.clash.core.model.Connection
+import com.github.kr328.clash.core.model.ConnectionDiff
 import com.github.kr328.clash.design.ConnectionsDesign
-import kotlinx.coroutines.channels.Channel
+import com.github.kr328.clash.design.databinding.DesignConnectionDetailsBinding
+import com.github.kr328.clash.design.util.formatBytes
+import com.github.kr328.clash.design.util.formatTraffic
+import com.github.kr328.clash.service.remote.IConnectionObserver
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
-import com.github.kr328.clash.service.remote.IConnectionObserver
-import com.github.kr328.clash.core.model.ConnectionDiff
+import kotlinx.coroutines.withTimeoutOrNull
+import android.widget.PopupMenu
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
     private var activeObserver: Any? = null
 
     override suspend fun main() {
-        val design = ConnectionsDesign(this)
+        val design = ConnectionsDesign(this, uiStore)
 
         setContentDesign(design)
 
-        val trackedConnections = mutableMapOf<String, com.github.kr328.clash.core.model.Connection>()
-        val connectionSpeeds = mutableMapOf<String, Long>() // id -> download speed
-        val connectionUploadSpeeds = mutableMapOf<String, Long>() // id -> upload speed
+        val connectionRecords = mutableMapOf<String, ConnectionRecord>()
+        val connectionSpeeds = mutableMapOf<String, Long>()
+        val connectionUploadSpeeds = mutableMapOf<String, Long>()
         val packageNames = mutableMapOf<String, String>()
         val packageIcons = mutableMapOf<String, android.graphics.drawable.Drawable?>()
         val collapsedGroups = mutableSetOf<String>()
         val closedConnectionIds = mutableSetOf<String>()
+        val closedConnectionOrder = java.util.ArrayDeque<String>()
+        var observerRegistered = false
+        var awaitingSnapshotReconcile = false
+        var selectedProcessKey: String? = uiStore.connectionProcessFilter.takeIf { it.isNotBlank() }
+        var detailsBinding: DesignConnectionDetailsBinding? = null
+        var detailsConnectionId: String? = null
 
-        fun formatTraffic(bytes: Long): String {
-            if (bytes < 1024) return "$bytes B/s"
-            val kb = bytes / 1024.0
-            if (kb < 1024) return String.format("%.1f KB/s", kb)
-            val mb = kb / 1024.0
-            if (mb < 1024) return String.format("%.1f MB/s", mb)
-            val gb = mb / 1024.0
-            return String.format("%.2f GB/s", gb)
+        fun normalizeProcessName(process: String?): String {
+            return process?.substringBefore(":")?.takeIf { it.isNotBlank() } ?: UNKNOWN_PACKAGE
         }
 
-        fun formatBytes(bytes: Long): String {
-            if (bytes < 1024) return "$bytes B"
-            val kb = bytes / 1024.0
-            if (kb < 1024) return String.format("%.1f KB", kb)
-            val mb = kb / 1024.0
-            if (mb < 1024) return String.format("%.1f MB", mb)
-            val gb = mb / 1024.0
-            return String.format("%.2f GB", gb)
+        fun resolveAppName(basePackage: String): String {
+            return packageNames.getOrPut("name_$basePackage") {
+                try {
+                    val info = packageManager.getApplicationInfo(basePackage, 0)
+                    packageManager.getApplicationLabel(info).toString()
+                } catch (e: Exception) {
+                    if (basePackage == UNKNOWN_PACKAGE || basePackage.isBlank()) {
+                        "System / External"
+                    } else {
+                        basePackage
+                    }
+                }
+            }
         }
 
-        val diffChannel = kotlinx.coroutines.channels.Channel<com.github.kr328.clash.core.model.ConnectionDiff>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        selectedProcessKey?.let {
+            design.setProcessFilterLabel(resolveAppName(it))
+        }
+
+        fun parseConnectionStartMillis(start: String): Long? {
+            if (start.isBlank()) return null
+
+            val normalized = normalizeConnectionStart(start)
+            for (pattern in CONNECTION_START_PATTERNS) {
+                val parsed = try {
+                    SimpleDateFormat(pattern, Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                        isLenient = false
+                    }.parse(normalized)
+                } catch (e: Exception) {
+                    null
+                }
+
+                if (parsed != null) return parsed.time
+            }
+
+            return null
+        }
+
+        fun connectionStartSortKey(connection: Connection): Long {
+            return parseConnectionStartMillis(connection.start) ?: Long.MAX_VALUE
+        }
+
+        fun formatDuration(start: String): String {
+            val startMillis = parseConnectionStartMillis(start) ?: return start
+            val durationSeconds = ((System.currentTimeMillis() - startMillis) / 1000).coerceAtLeast(0)
+            val mm = String.format(Locale.US, "%02d", (durationSeconds % 3600) / 60)
+            val ss = String.format(Locale.US, "%02d", durationSeconds % 60)
+            val hh = if (durationSeconds >= 3600) {
+                String.format(Locale.US, "%02d:", durationSeconds / 3600)
+            } else {
+                ""
+            }
+            return "$hh$mm:$ss"
+        }
+
+        fun formatSnapshotTime(timeMillis: Long): String {
+            return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(timeMillis))
+        }
+
+        fun boundedTrafficDelta(delta: Long): Long {
+            return if (delta in 0..MAX_REASONABLE_SPEED_BYTES_PER_SECOND) delta else 0L
+        }
+
+        fun formatRuleText(connection: Connection): String {
+            return when {
+                connection.rule.isBlank() && connection.rulePayload.isBlank() -> "N/A"
+                connection.rulePayload.isNotEmpty() -> "${connection.rule} (${connection.rulePayload})"
+                else -> connection.rule
+            }
+        }
+
+        fun pruneClosedConnections() {
+            while (closedConnectionIds.size > MAX_CLOSED_CONNECTIONS && closedConnectionOrder.isNotEmpty()) {
+                val expiredId = closedConnectionOrder.removeFirst()
+                if (closedConnectionIds.remove(expiredId)) {
+                    connectionRecords.remove(expiredId)
+                    connectionSpeeds.remove(expiredId)
+                    connectionUploadSpeeds.remove(expiredId)
+                }
+            }
+        }
+
+        fun markConnectionClosed(id: String, connection: Connection? = null) {
+            val record = connectionRecords[id]
+            if (record != null) {
+                if (connection != null) {
+                    record.connection = connection
+                }
+                record.closed = true
+            } else if (connection != null) {
+                connectionRecords[id] = ConnectionRecord(connection, closed = true)
+            } else {
+                return
+            }
+
+            if (closedConnectionIds.add(id)) {
+                closedConnectionOrder.addLast(id)
+            }
+            connectionSpeeds[id] = 0L
+            connectionUploadSpeeds[id] = 0L
+        }
+
+        fun updateConnectionDetails(binding: DesignConnectionDetailsBinding, id: String) {
+            val record = connectionRecords[id] ?: return
+            val conn = record.connection
+            val meta = conn.metadata
+            val isClosed = record.closed
+
+            binding.tvDest.text = meta.host.ifEmpty { meta.destinationIP }
+            binding.tvPort.text = meta.destinationPort
+            binding.tvNetwork.text = meta.network.uppercase()
+            binding.tvProcess.text = resolveAppName(normalizeProcessName(meta.process))
+            binding.tvDns.text = conn.dnsServer.takeUnless { it.isNullOrEmpty() } ?: "N/A"
+            binding.tvDnsMode.text = meta.dnsMode.takeUnless { it.isNullOrEmpty() } ?: "N/A"
+            binding.tvIp.text = meta.destinationIP
+
+            val countryCode = meta.destinationGeoIP?.firstOrNull()?.uppercase() ?: ""
+            val flag = if (countryCode.length == 2) {
+                val flagOffset = 0x1F1E6
+                val asciiOffset = 0x41
+                val firstChar = Character.codePointAt(countryCode, 0) - asciiOffset + flagOffset
+                val secondChar = Character.codePointAt(countryCode, 1) - asciiOffset + flagOffset
+                String(Character.toChars(firstChar)) + String(Character.toChars(secondChar))
+            } else {
+                ""
+            }
+            binding.tvCountry.text = if (countryCode.isNotEmpty()) "$countryCode $flag" else "Unknown"
+
+            binding.tvRule.text = formatRuleText(conn)
+            binding.tvChain.text = conn.chains.joinToString(" -> ")
+            binding.tvDuration.text = formatDuration(conn.start)
+            binding.tvSpeed.text = if (isClosed) {
+                "↓ 0 B/s  ↑ 0 B/s"
+            } else {
+                "↓ ${formatTraffic(connectionSpeeds[id] ?: 0L)}  ↑ ${formatTraffic(connectionUploadSpeeds[id] ?: 0L)}"
+            }
+            binding.tvUp.text = formatBytes(conn.upload)
+            binding.tvDown.text = formatBytes(conn.download)
+            binding.tvStatus.text = getString(
+                if (isClosed) {
+                    com.github.kr328.clash.design.R.string.closed
+                } else {
+                    com.github.kr328.clash.design.R.string.active
+                }
+            )
+            binding.tvSnapshotTime.text = formatSnapshotTime(System.currentTimeMillis())
+            binding.tvMetadataType.text = meta.type.ifBlank { "N/A" }
+            binding.tvSpecialProxy.text = meta.specialProxy.ifBlank { "N/A" }
+            binding.tvSpecialRules.text = meta.specialRules.ifBlank { "N/A" }
+            binding.btnCloseConnection.isEnabled = !isClosed
+        }
+
+        val diffChannel = Channel<ConnectionDiff>(Channel.UNLIMITED)
 
         val adapter = com.github.kr328.clash.design.adapter.ConnectionAdapter(
             context = this,
@@ -60,70 +211,84 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 } else {
                     collapsedGroups.add(packageName)
                 }
-                diffChannel.trySend(com.github.kr328.clash.core.model.ConnectionDiff())
+                diffChannel.trySend(ConnectionDiff())
             },
             onClick = { conn ->
-                val binding = com.github.kr328.clash.design.databinding.DesignConnectionDetailsBinding.inflate(layoutInflater)
-                
-                // Populate fields
-                val meta = conn.metadata
-                binding.tvDest.text = meta.host.ifEmpty { meta.destinationIP }
-                binding.tvPort.text = meta.destinationPort
-                binding.tvNetwork.text = meta.network.uppercase()
-                binding.tvProcess.text = packageNames[meta.process] ?: meta.process ?: "Unknown"
-                binding.tvDns.text = conn.dnsServer.takeUnless { it.isNullOrEmpty() } ?: "N/A"
-                binding.tvDnsMode.text = meta.dnsMode.takeUnless { it.isNullOrEmpty() } ?: "N/A"
-                binding.tvIp.text = meta.destinationIP
-                
-                val countryCode = meta.destinationGeoIP?.firstOrNull()?.uppercase() ?: ""
-                val flag = if (countryCode.length == 2) {
-                    val flagOffset = 0x1F1E6
-                    val asciiOffset = 0x41
-                    val firstChar = Character.codePointAt(countryCode, 0) - asciiOffset + flagOffset
-                    val secondChar = Character.codePointAt(countryCode, 1) - asciiOffset + flagOffset
-                    String(Character.toChars(firstChar)) + String(Character.toChars(secondChar))
-                } else ""
-                binding.tvCountry.text = if (countryCode.isNotEmpty()) "$countryCode $flag" else "Unknown"
-                
-                binding.tvRule.text = if (conn.rulePayload.isNotEmpty()) "${conn.rule} (${conn.rulePayload})" else conn.rule
-                binding.tvChain.text = conn.chains.joinToString(" -> ")
-                
-                // Duration calculation
-                try {
-                    val startMillis = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply { 
-                        timeZone = java.util.TimeZone.getTimeZone("UTC")
-                    }.parse(conn.start)?.time ?: System.currentTimeMillis()
-                    
-                    val durationSeconds = (System.currentTimeMillis() - startMillis) / 1000
-                    val mm = String.format("%02d", (durationSeconds % 3600) / 60)
-                    val ss = String.format("%02d", durationSeconds % 60)
-                    val hh = if (durationSeconds >= 3600) String.format("%02d:", durationSeconds / 3600) else ""
-                    binding.tvDuration.text = "$hh$mm:$ss"
-                } catch (e: Exception) {
-                    binding.tvDuration.text = conn.start
-                }
-                
-                binding.tvUp.text = formatBytes(conn.upload)
-                binding.tvDown.text = formatBytes(conn.download)
-
+                val binding = DesignConnectionDetailsBinding.inflate(layoutInflater)
                 val dialog = com.github.kr328.clash.design.dialog.FullScreenDialog(this@ConnectionsActivity)
                 binding.self = dialog
                 dialog.setContentView(binding.root)
-                
+
+                detailsBinding = binding
+                detailsConnectionId = conn.id
+                updateConnectionDetails(binding, conn.id)
+
                 binding.toolbar.setNavigationOnClickListener { dialog.dismiss() }
                 binding.btnCloseConnection.setOnClickListener {
-                    kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                        com.github.kr328.clash.util.withClash {
-                            closeConnection(conn.id)
+                    this@ConnectionsActivity.launch(Dispatchers.IO) {
+                        withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
+                            com.github.kr328.clash.util.withClash {
+                                closeConnection(conn.id)
+                            }
                         }
                     }
-                    dialog.dismiss() 
+                    dialog.dismiss()
                 }
-                
+                dialog.setOnDismissListener {
+                    if (detailsBinding === binding) {
+                        detailsBinding = null
+                        detailsConnectionId = null
+                    }
+                }
+
                 dialog.show()
             }
         )
         design.setAdapter(adapter)
+
+        fun clearConnectionList() {
+            connectionRecords.clear()
+            connectionSpeeds.clear()
+            connectionUploadSpeeds.clear()
+            collapsedGroups.clear()
+            closedConnectionIds.clear()
+            closedConnectionOrder.clear()
+            selectedProcessKey = null
+            uiStore.connectionProcessFilter = ""
+            design.setProcessFilterLabel(null)
+            adapter.submitList(emptyList())
+        }
+
+        fun showProcessFilterMenu() {
+            val options = mutableListOf<Pair<String?, String>>()
+            options.add(null to getString(com.github.kr328.clash.design.R.string.connections_process_all))
+            selectedProcessKey?.let { processKey ->
+                options.add(processKey to resolveAppName(processKey))
+            }
+            connectionRecords.values
+                .map { normalizeProcessName(it.connection.metadata.process) }
+                .distinct()
+                .sortedBy { resolveAppName(it).lowercase(Locale.getDefault()) }
+                .forEach { processKey ->
+                    if (options.none { it.first == processKey }) {
+                        options.add(processKey to resolveAppName(processKey))
+                    }
+                }
+
+            val popup = PopupMenu(this@ConnectionsActivity, design.binding.chipProcess)
+            options.forEachIndexed { index, option ->
+                popup.menu.add(0, index, index, option.second)
+            }
+            popup.setOnMenuItemClickListener { item ->
+                val option = options.getOrNull(item.itemId) ?: return@setOnMenuItemClickListener true
+                selectedProcessKey = option.first
+                uiStore.connectionProcessFilter = option.first.orEmpty()
+                design.setProcessFilterLabel(option.second)
+                diffChannel.trySend(ConnectionDiff())
+                true
+            }
+            popup.show()
+        }
 
         val observer = object : IConnectionObserver {
             override fun onConnectionDiff(diff: ConnectionDiff) {
@@ -133,203 +298,299 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         val observerBinder = com.github.kr328.clash.service.remote.IConnectionObserverDelegate(observer)
         this.activeObserver = observerBinder
 
-        withContext(Dispatchers.IO) {
-            com.github.kr328.clash.util.withClash {
-                setConnectionObserver(observerBinder)
+        suspend fun registerObserver(force: Boolean = false) {
+            if (!force && observerRegistered) return
+
+            val registered = withContext(Dispatchers.IO) {
+                withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
+                    com.github.kr328.clash.util.withClash {
+                        setConnectionObserver(observerBinder, design.refreshIntervalMillis)
+                    }
+                    true
+                } ?: false
+            }
+
+            observerRegistered = registered
+            awaitingSnapshotReconcile = registered
+            if (!registered) {
+                Log.w("Failed to register connection observer")
             }
         }
+
+        suspend fun unregisterObserver() {
+            withContext(NonCancellable + Dispatchers.IO) {
+                withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
+                    com.github.kr328.clash.util.withClash {
+                        setConnectionObserver(null, design.refreshIntervalMillis)
+                    }
+                }
+            }
+            observerRegistered = false
+            awaitingSnapshotReconcile = false
+        }
+
+        registerObserver(force = true)
 
         try {
             while (isActive) {
                 select<Unit> {
                     events.onReceive {
                         when (it) {
-                            Event.ActivityStart, Event.ServiceRecreated -> {
-                                withContext(Dispatchers.IO) {
-                                    com.github.kr328.clash.util.withClash {
-                                        setConnectionObserver(observerBinder)
-                                    }
-                                }
-                            }
+                            Event.ActivityStart -> registerObserver(force = true)
+                            Event.ActivityStop -> unregisterObserver()
+                            Event.ServiceRecreated -> registerObserver(force = true)
                             else -> {}
                         }
                     }
                     design.requests.onReceive {
                         when (it) {
                             ConnectionsDesign.Request.Close -> finish()
-                            ConnectionsDesign.Request.FilterChanged -> {
-                                diffChannel.trySend(com.github.kr328.clash.core.model.ConnectionDiff())
+                            ConnectionsDesign.Request.ClearConnections -> {
+                                clearConnectionList()
+                                registerObserver(force = true)
                             }
+                            ConnectionsDesign.Request.FilterChanged -> {
+                                diffChannel.trySend(ConnectionDiff())
+                            }
+                            ConnectionsDesign.Request.ProcessFilterClicked -> showProcessFilterMenu()
+                            ConnectionsDesign.Request.RefreshIntervalChanged -> registerObserver(force = true)
                         }
                     }
                     diffChannel.onReceive { diff ->
                         val filterActive = design.filterActive
                         val filterClosed = design.filterClosed
                         val sortType = design.sortType
+                        val processFilter = selectedProcessKey
 
                         try {
-                            // Update local tracked connections map
+                            val reconcileSnapshot = awaitingSnapshotReconcile && diff.timestamp > 0L
+                            if (diff.timestamp > 0L) {
+                                awaitingSnapshotReconcile = false
+                            }
+                            val newConnectionIds = diff.newConnections.mapTo(mutableSetOf()) { it.id }
+
                             for (conn in diff.newConnections) {
-                                if (!trackedConnections.containsKey(conn.id)) {
+                                closedConnectionIds.remove(conn.id)
+                                closedConnectionOrder.remove(conn.id)
+                                if (!connectionRecords.containsKey(conn.id)) {
                                     connectionSpeeds[conn.id] = 0L
                                     connectionUploadSpeeds[conn.id] = 0L
                                 }
-                                trackedConnections[conn.id] = conn
+                                connectionRecords[conn.id] = ConnectionRecord(conn, closed = false)
                             }
-                            
+
+                            val removedDetailIds = diff.removedConnectionDetails.mapTo(mutableSetOf()) { it.id }
+                            for (conn in diff.removedConnectionDetails) {
+                                markConnectionClosed(conn.id, conn)
+                            }
+
                             for (id in diff.removedConnections) {
-                                closedConnectionIds.add(id)
-                                connectionSpeeds[id] = 0L
-                                connectionUploadSpeeds[id] = 0L
-                            }
-                            
-                            for (traffic in diff.updatedTraffics) {
-                                val prevConn = trackedConnections[traffic.id]
-                                if (prevConn != null) {
-                                    connectionSpeeds[traffic.id] = traffic.download - prevConn.download
-                                    connectionUploadSpeeds[traffic.id] = traffic.upload - prevConn.upload
-                                    trackedConnections[traffic.id] = prevConn.copy(download = traffic.download, upload = traffic.upload)
+                                if (id !in removedDetailIds) {
+                                    markConnectionClosed(id)
                                 }
                             }
-                            
-                            val activeIds = diff.newConnections.map { it.id }.toSet() + diff.updatedTraffics.map { it.id }.toSet() // Approximating active
 
-                            // Filter to build the items list
-                            val items = mutableListOf<com.github.kr328.clash.design.adapter.ConnectionItem>()
-                            
-                            val allDisplayConns = trackedConnections.values.filter { conn ->
-                                // For diff architecture, assume removed = closed. If in trackedConnections, it is active
-                                val isActiveConn = !closedConnectionIds.contains(conn.id)
-                                if (isActiveConn && !filterActive) return@filter false
-                                if (!isActiveConn && !filterClosed) return@filter false
+                            if (reconcileSnapshot) {
+                                val activeIds = newConnectionIds
+                                connectionRecords
+                                    .filter { (id, record) -> !record.closed && id !in activeIds }
+                                    .keys
+                                    .toList()
+                                    .forEach { id -> markConnectionClosed(id) }
+                            }
+                            pruneClosedConnections()
+
+                            for (traffic in diff.updatedTraffics) {
+                                if (traffic.id in newConnectionIds) continue
+
+                                val record = connectionRecords[traffic.id]
+                                val prevConn = record?.connection
+                                if (record != null && prevConn != null) {
+                                    connectionSpeeds[traffic.id] = boundedTrafficDelta(traffic.download - prevConn.download)
+                                    connectionUploadSpeeds[traffic.id] = boundedTrafficDelta(traffic.upload - prevConn.upload)
+                                    record.connection = prevConn.copy(download = traffic.download, upload = traffic.upload)
+                                }
+                            }
+
+                            val allDisplayRecords = connectionRecords.values.filter { record ->
+                                if (!record.closed && !filterActive) return@filter false
+                                if (record.closed && !filterClosed) return@filter false
+                                if (processFilter != null && normalizeProcessName(record.connection.metadata.process) != processFilter) return@filter false
                                 true
                             }
 
-                            val grouped = allDisplayConns.groupBy { 
-                                it.metadata.process?.substringBefore(":")?.takeIf { p -> p.isNotEmpty() } ?: "Unknown" 
+                            val grouped = allDisplayRecords.groupBy {
+                                normalizeProcessName(it.connection.metadata.process)
                             }
 
                             val sortedGrouped = grouped.entries.sortedWith { a, b ->
                                 when (sortType) {
-                                    com.github.kr328.clash.design.ConnectionsDesign.SortType.NAME -> {
+                                    ConnectionsDesign.SortType.TIME -> {
+                                        val timeA = a.value.minOfOrNull { connectionStartSortKey(it.connection) } ?: Long.MAX_VALUE
+                                        val timeB = b.value.minOfOrNull { connectionStartSortKey(it.connection) } ?: Long.MAX_VALUE
+                                        timeA.compareTo(timeB).takeIf { it != 0 } ?: a.key.compareTo(b.key, ignoreCase = true)
+                                    }
+                                    ConnectionsDesign.SortType.NAME -> {
                                         a.key.compareTo(b.key, ignoreCase = true)
                                     }
-                                    com.github.kr328.clash.design.ConnectionsDesign.SortType.SPEED_DOWN -> {
-                                        val sumA = a.value.sumOf { connectionSpeeds[it.id] ?: 0L }
-                                        val sumB = b.value.sumOf { connectionSpeeds[it.id] ?: 0L }
+                                    ConnectionsDesign.SortType.SPEED_DOWN -> {
+                                        val sumA = a.value.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
+                                        val sumB = b.value.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
                                         sumB.compareTo(sumA)
                                     }
-                                    com.github.kr328.clash.design.ConnectionsDesign.SortType.SPEED_UP -> {
-                                        val sumA = a.value.sumOf { connectionUploadSpeeds[it.id] ?: 0L }
-                                        val sumB = b.value.sumOf { connectionUploadSpeeds[it.id] ?: 0L }
+                                    ConnectionsDesign.SortType.SPEED_UP -> {
+                                        val sumA = a.value.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
+                                        val sumB = b.value.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
                                         sumB.compareTo(sumA)
                                     }
-                                    com.github.kr328.clash.design.ConnectionsDesign.SortType.TRAFFIC_DOWN -> {
-                                        val sumA = a.value.sumOf { it.download }
-                                        val sumB = b.value.sumOf { it.download }
+                                    ConnectionsDesign.SortType.TRAFFIC_DOWN -> {
+                                        val sumA = a.value.sumOf { it.connection.download }
+                                        val sumB = b.value.sumOf { it.connection.download }
                                         sumB.compareTo(sumA)
                                     }
-                                    com.github.kr328.clash.design.ConnectionsDesign.SortType.TRAFFIC_UP -> {
-                                        val sumA = a.value.sumOf { it.upload }
-                                        val sumB = b.value.sumOf { it.upload }
+                                    ConnectionsDesign.SortType.TRAFFIC_UP -> {
+                                        val sumA = a.value.sumOf { it.connection.upload }
+                                        val sumB = b.value.sumOf { it.connection.upload }
                                         sumB.compareTo(sumA)
-                                    }
-                                    else -> {
-                                        // Default: approximate time sort or leave as is (preserves map order which is based on diff insertion)
-                                        0
                                     }
                                 }
                             }
 
+                            val items = mutableListOf<com.github.kr328.clash.design.adapter.ConnectionItem>()
+
                             for ((basePackage, connsUnsorted) in sortedGrouped) {
                                 val conns = connsUnsorted.sortedWith { a, b ->
+                                    val connA = a.connection
+                                    val connB = b.connection
                                     when (sortType) {
-                                        com.github.kr328.clash.design.ConnectionsDesign.SortType.NAME -> {
-                                            val nameA = a.metadata.host.ifEmpty { a.metadata.destinationIP }
-                                            val nameB = b.metadata.host.ifEmpty { b.metadata.destinationIP }
+                                        ConnectionsDesign.SortType.TIME -> {
+                                            val timeCompare = connectionStartSortKey(connA).compareTo(connectionStartSortKey(connB))
+                                            if (timeCompare != 0) {
+                                                timeCompare
+                                            } else {
+                                                val nameA = connA.metadata.host.ifEmpty { connA.metadata.destinationIP }
+                                                val nameB = connB.metadata.host.ifEmpty { connB.metadata.destinationIP }
+                                                nameA.compareTo(nameB, ignoreCase = true)
+                                            }
+                                        }
+                                        ConnectionsDesign.SortType.NAME -> {
+                                            val nameA = connA.metadata.host.ifEmpty { connA.metadata.destinationIP }
+                                            val nameB = connB.metadata.host.ifEmpty { connB.metadata.destinationIP }
                                             nameA.compareTo(nameB, ignoreCase = true)
                                         }
-                                        com.github.kr328.clash.design.ConnectionsDesign.SortType.SPEED_DOWN -> {
-                                            val speedA = connectionSpeeds[a.id] ?: 0L
-                                            val speedB = connectionSpeeds[b.id] ?: 0L
+                                        ConnectionsDesign.SortType.SPEED_DOWN -> {
+                                            val speedA = connectionSpeeds[connA.id] ?: 0L
+                                            val speedB = connectionSpeeds[connB.id] ?: 0L
                                             speedB.compareTo(speedA)
                                         }
-                                        com.github.kr328.clash.design.ConnectionsDesign.SortType.SPEED_UP -> {
-                                            val speedA = connectionUploadSpeeds[a.id] ?: 0L
-                                            val speedB = connectionUploadSpeeds[b.id] ?: 0L
+                                        ConnectionsDesign.SortType.SPEED_UP -> {
+                                            val speedA = connectionUploadSpeeds[connA.id] ?: 0L
+                                            val speedB = connectionUploadSpeeds[connB.id] ?: 0L
                                             speedB.compareTo(speedA)
                                         }
-                                        com.github.kr328.clash.design.ConnectionsDesign.SortType.TRAFFIC_DOWN -> b.download.compareTo(a.download)
-                                        com.github.kr328.clash.design.ConnectionsDesign.SortType.TRAFFIC_UP -> b.upload.compareTo(a.upload)
-                                        else -> 0
+                                        ConnectionsDesign.SortType.TRAFFIC_DOWN -> connB.download.compareTo(connA.download)
+                                        ConnectionsDesign.SortType.TRAFFIC_UP -> connB.upload.compareTo(connA.upload)
                                     }
                                 }
 
-                                val activeCount = conns.count { !closedConnectionIds.contains(it.id) } // All in tracked are active, until removed
-                                
-                                // Resolve app info
-                                val appName = packageNames.getOrPut("name_$basePackage") {
-                                    try {
-                                        val pm = packageManager
-                                        val info = pm.getApplicationInfo(basePackage, 0)
-                                        pm.getApplicationLabel(info).toString()
-                                    } catch (e: Exception) {
-                                        if (basePackage == "Unknown" || basePackage.isBlank()) "System / External" else basePackage
-                                    }
-                                }
+                                val activeCount = conns.count { !it.closed }
+                                val appName = resolveAppName(basePackage)
                                 val appIcon = packageIcons.getOrPut("icon_$basePackage") {
                                     try {
                                         packageManager.getApplicationIcon(basePackage)
                                     } catch (e: Exception) {
-                                        androidx.core.content.ContextCompat.getDrawable(this@ConnectionsActivity, android.R.mipmap.sym_def_app_icon) ?: androidx.core.content.ContextCompat.getDrawable(this@ConnectionsActivity, android.R.drawable.sym_def_app_icon)
+                                        androidx.core.content.ContextCompat.getDrawable(
+                                            this@ConnectionsActivity,
+                                            android.R.mipmap.sym_def_app_icon
+                                        ) ?: androidx.core.content.ContextCompat.getDrawable(
+                                            this@ConnectionsActivity,
+                                            android.R.drawable.sym_def_app_icon
+                                        )
                                     }
                                 }
 
-                                val totalSpeedBytes = conns.sumOf { connectionSpeeds[it.id] ?: 0L }
-                                val totalUploadSpeedBytes = conns.sumOf { connectionUploadSpeeds[it.id] ?: 0L }
+                                val totalSpeedBytes = conns.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
+                                val totalUploadSpeedBytes = conns.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
                                 val totalSpeed = "↓ ${formatTraffic(totalSpeedBytes)}  ↑ ${formatTraffic(totalUploadSpeedBytes)}"
-                                val totalUploadBytes = conns.sumOf { it.upload }
-                                val totalDownloadBytes = conns.sumOf { it.download }
-                                
+                                val totalUploadBytes = conns.sumOf { it.connection.upload }
+                                val totalDownloadBytes = conns.sumOf { it.connection.download }
+
                                 val isExpanded = !collapsedGroups.contains(basePackage)
-                                items.add(com.github.kr328.clash.design.adapter.ConnectionItem.Group(
-                                    packageName = basePackage,
-                                    appName = appName,
-                                    appIcon = appIcon,
-                                    activeCount = activeCount,
-                                    totalCount = conns.size,
-                                    totalSpeed = totalSpeed,
-                                    totalUpload = totalUploadBytes,
-                                    totalDownload = totalDownloadBytes,
-                                    isExpanded = isExpanded
-                                ))
-                                
+                                items.add(
+                                    com.github.kr328.clash.design.adapter.ConnectionItem.Group(
+                                        packageName = basePackage,
+                                        appName = appName,
+                                        appIcon = appIcon,
+                                        activeCount = activeCount,
+                                        totalCount = conns.size,
+                                        totalSpeed = totalSpeed,
+                                        totalUpload = totalUploadBytes,
+                                        totalDownload = totalDownloadBytes,
+                                        isExpanded = isExpanded
+                                    )
+                                )
+
                                 if (isExpanded) {
-                                    for (conn in conns) {
-                                        val isActiveConn = !closedConnectionIds.contains(conn.id)
+                                    for (record in conns) {
+                                        val conn = record.connection
                                         val speedBytes = connectionSpeeds[conn.id] ?: 0L
                                         val uploadSpeedBytes = connectionUploadSpeeds[conn.id] ?: 0L
                                         val speed = "↓ ${formatTraffic(speedBytes)}  ↑ ${formatTraffic(uploadSpeedBytes)}"
-                                        items.add(com.github.kr328.clash.design.adapter.ConnectionItem.Child(conn, speed, isActiveConn))
+                                        items.add(com.github.kr328.clash.design.adapter.ConnectionItem.Child(conn, speed, !record.closed))
                                     }
                                 }
                             }
-                            
-                            // Let the design update its own adapter since we passed it in
+
                             adapter.submitList(items)
+                            detailsBinding?.let { binding ->
+                                detailsConnectionId?.let { id ->
+                                    updateConnectionDetails(binding, id)
+                                }
+                            }
                         } catch (e: Exception) {
-                            com.github.kr328.clash.common.log.Log.w("Failed to update connections UI", e)
+                            Log.w("Failed to update connections UI", e)
                         }
                     }
                 }
             }
         } finally {
-            withContext(Dispatchers.IO) {
-                com.github.kr328.clash.util.withClash {
-                    setConnectionObserver(null)
-                }
-            }
+            unregisterObserver()
             this.activeObserver = null
+        }
+    }
+
+    private data class ConnectionRecord(
+        var connection: Connection,
+        var closed: Boolean
+    )
+
+    companion object {
+        private const val UNKNOWN_PACKAGE = "Unknown"
+        private const val MAX_CLOSED_CONNECTIONS = 1000
+        private const val MAX_REASONABLE_SPEED_BYTES_PER_SECOND = 10L * 1024L * 1024L * 1024L
+        private const val REMOTE_CALL_TIMEOUT_MILLIS = 3_000L
+
+        private val CONNECTION_START_FRACTION_REGEX = Regex("""\.(\d{1,9})(?=Z|[+-]\d{2}:?\d{2}$|$)""")
+        private val CONNECTION_START_TIMEZONE_COLON_REGEX = Regex("""([+-]\d{2}):(\d{2})$""")
+        private val CONNECTION_START_PATTERNS = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+            "yyyy-MM-dd'T'HH:mm:ssZ",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss"
+        )
+
+        private fun normalizeConnectionStart(start: String): String {
+            val normalizedFraction = CONNECTION_START_FRACTION_REGEX.replace(start.trim()) { match ->
+                ".${match.groupValues[1].take(3).padEnd(3, '0')}"
+            }
+            val normalizedUtc = if (normalizedFraction.endsWith("Z")) {
+                normalizedFraction.dropLast(1) + "+0000"
+            } else {
+                normalizedFraction
+            }
+            return CONNECTION_START_TIMEZONE_COLON_REGEX.replace(normalizedUtc) { match ->
+                "${match.groupValues[1]}${match.groupValues[2]}"
+            }
         }
     }
 }

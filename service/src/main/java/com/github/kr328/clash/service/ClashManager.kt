@@ -44,12 +44,13 @@ class ClashManager(private val context: Context) : IClashManager,
         return ProviderList(Clash.queryProviders())
     }
 
-    override fun setConnectionObserver(observer: IConnectionObserver?) {
+    override fun setConnectionObserver(observer: IConnectionObserver?, intervalMillis: Long) {
         synchronized(this) {
             connectionObserverJob?.cancel()
             connectionObserverJob = null
 
             if (observer != null) {
+                val pollInterval = intervalMillis.coerceIn(500L, 5000L)
                 connectionObserverJob = launch {
                     var lastConnections = emptyMap<String, Connection>()
                     try {
@@ -62,25 +63,43 @@ class ClashManager(private val context: Context) : IClashManager,
                                     
                                     val newConnections = mutableListOf<Connection>()
                                     val removedConnections = mutableListOf<String>()
+                                    val removedConnectionDetails = mutableListOf<Connection>()
                                     val updatedTraffics = mutableListOf<ConnectionTraffic>()
                                     
                                     for ((id, conn) in currentConnections) {
                                         val last = lastConnections[id]
+                                        val chainText = conn.chains.joinToString(" -> ")
+                                        if (conn.rule.isBlank() && conn.chains.isNotEmpty() && last?.rule != conn.rule) {
+                                            Log.d(
+                                                "ConnectionRuleTrace blank-rule id=$id host=${conn.metadata.host} " +
+                                                    "ip=${conn.metadata.destinationIP} chain=$chainText type=${conn.metadata.type} " +
+                                                    "specialProxy=${conn.metadata.specialProxy} specialRules=${conn.metadata.specialRules}"
+                                            )
+                                        }
+                                        if (last != null && (last.rule != conn.rule || last.rulePayload != conn.rulePayload)) {
+                                            Log.d(
+                                                "ConnectionRuleTrace rule-change id=$id host=${conn.metadata.host} " +
+                                                    "ip=${conn.metadata.destinationIP} old=${last.rule}/${last.rulePayload} " +
+                                                    "new=${conn.rule}/${conn.rulePayload} chain=$chainText type=${conn.metadata.type} " +
+                                                    "specialProxy=${conn.metadata.specialProxy} specialRules=${conn.metadata.specialRules}"
+                                            )
+                                        }
                                         if (last == null) {
                                             newConnections.add(conn)
                                         } else {
                                             val hasMetaChanged = conn.copy(upload = 0, download = 0) != last.copy(upload = 0, download = 0)
                                             if (hasMetaChanged) {
                                                 newConnections.add(conn)
-                                            } else if (conn.upload != last.upload || conn.download != last.download) {
+                                            } else {
                                                 updatedTraffics.add(ConnectionTraffic(id, conn.upload, conn.download))
                                             }
                                         }
                                     }
                                     
-                                    for (id in lastConnections.keys) {
+                                    for ((id, conn) in lastConnections) {
                                         if (!currentConnections.containsKey(id)) {
                                             removedConnections.add(id)
+                                            removedConnectionDetails.add(conn)
                                         }
                                     }
                                     
@@ -90,6 +109,7 @@ class ClashManager(private val context: Context) : IClashManager,
                                         totalDownload = snapshot?.downloadTotal ?: 0L,
                                         newConnections = newConnections,
                                         removedConnections = removedConnections,
+                                        removedConnectionDetails = removedConnectionDetails,
                                         updatedTraffics = updatedTraffics
                                     )
                                     
@@ -105,7 +125,7 @@ class ClashManager(private val context: Context) : IClashManager,
                             } catch (e: Exception) {
                                 Log.w("Connection observer poll error, retrying", e)
                             }
-                            delay(1000)
+                            delay(pollInterval)
                         }
                     } catch (e: CancellationException) {
                         // ignore

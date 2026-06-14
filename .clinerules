@@ -1,5 +1,0 @@
-# Project Rules
-
-1. **Build Configuration**: NEVER build the debug branch/variant. When building or packaging the application, ALWAYS use the `release` build variant (e.g., `.\gradlew assembleRelease` instead of `assembleDebug`).
-
-2. **Workflow & Safety**: Under ALL circumstances, before making any code modifications or applying changes, you MUST FIRST output an implementation plan and explicitly wait for the user's confirmation and approval. DO NOT edit code without the user's explicit consent on the proposed plan.

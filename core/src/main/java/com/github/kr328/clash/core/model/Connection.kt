@@ -79,7 +79,9 @@ data class Metadata(
     val destinationGeoIP: List<String>? = null,
     val sourceIPASN: String? = null,
     val destinationIPASN: String? = null,
-    val dnsMode: String = ""
+    val dnsMode: String = "",
+    val specialProxy: String = "",
+    val specialRules: String = ""
 ) : Parcelable {
     override fun writeToParcel(parcel: Parcel, flags: Int) {
         Parcelizer.encodeToParcel(serializer(), parcel, this)

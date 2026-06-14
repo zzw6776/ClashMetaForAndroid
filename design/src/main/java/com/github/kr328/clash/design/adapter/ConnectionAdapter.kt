@@ -2,13 +2,17 @@ package com.github.kr328.clash.design.adapter
 
 import android.content.Context
 import android.view.ViewGroup
+import androidx.core.graphics.ColorUtils
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.github.kr328.clash.core.model.Connection
+import com.github.kr328.clash.design.R
 import com.github.kr328.clash.design.databinding.AdapterConnectionGroupBinding
 import com.github.kr328.clash.design.databinding.AdapterConnectionItemBinding
+import com.github.kr328.clash.design.util.formatBytes
 import com.github.kr328.clash.design.util.layoutInflater
+import com.google.android.material.color.MaterialColors
 
 sealed class ConnectionItem {
     data class Group(
@@ -43,7 +47,20 @@ class ConnectionAdapter(
         }
 
         override fun areContentsTheSame(oldItem: ConnectionItem, newItem: ConnectionItem): Boolean {
-            return oldItem == newItem
+            return when {
+                oldItem is ConnectionItem.Group && newItem is ConnectionItem.Group -> {
+                    oldItem.packageName == newItem.packageName &&
+                        oldItem.appName == newItem.appName &&
+                        oldItem.activeCount == newItem.activeCount &&
+                        oldItem.totalCount == newItem.totalCount &&
+                        oldItem.totalSpeed == newItem.totalSpeed &&
+                        oldItem.totalUpload == newItem.totalUpload &&
+                        oldItem.totalDownload == newItem.totalDownload &&
+                        oldItem.isExpanded == newItem.isExpanded
+                }
+                oldItem is ConnectionItem.Child && newItem is ConnectionItem.Child -> oldItem == newItem
+                else -> false
+            }
         }
     }
 
@@ -71,20 +88,28 @@ class ConnectionAdapter(
     inner class GroupHolder(private val binding: AdapterConnectionGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         init {
             binding.root.setOnClickListener {
-                val item = currentList[adapterPosition] as? ConnectionItem.Group
+                val position = bindingAdapterPosition
+                if (position == RecyclerView.NO_POSITION || position >= currentList.size) return@setOnClickListener
+
+                val item = currentList[position] as? ConnectionItem.Group
                 if (item != null) onGroupClick(item.packageName)
             }
         }
 
         fun bind(item: ConnectionItem.Group) {
-            binding.appName.text = item.appName
-            val countStr = if (item.activeCount == item.totalCount) {
-                "${item.activeCount} Active"
-            } else {
-                "${item.activeCount} Active / ${item.totalCount} Total"
-            }
-            binding.connectionCount.text = "$countStr  |  U: ${formatBytes(item.totalUpload)}  D: ${formatBytes(item.totalDownload)}"
+            val groupAlpha = if (item.activeCount == 0) 0.55f else 1f
+            binding.appName.text = "${item.appName} · ${item.activeCount}/${item.totalCount}"
             binding.speed.text = item.totalSpeed
+            binding.connectionCount.text = context.getString(
+                R.string.connections_total_format,
+                formatBytes(item.totalDownload),
+                formatBytes(item.totalUpload)
+            )
+            binding.appName.alpha = groupAlpha
+            binding.speed.alpha = groupAlpha
+            binding.connectionCount.alpha = groupAlpha
+            binding.appIcon.alpha = groupAlpha
+            binding.ivExpandIcon.alpha = groupAlpha
             if (item.appIcon != null) {
                 binding.appIcon.setImageDrawable(item.appIcon)
             } else {
@@ -97,7 +122,10 @@ class ConnectionAdapter(
     inner class ChildHolder(private val binding: AdapterConnectionItemBinding) : RecyclerView.ViewHolder(binding.root) {
         init {
             binding.root.setOnClickListener {
-                val item = currentList[adapterPosition] as? ConnectionItem.Child
+                val position = bindingAdapterPosition
+                if (position == RecyclerView.NO_POSITION || position >= currentList.size) return@setOnClickListener
+
+                val item = currentList[position] as? ConnectionItem.Child
                 if (item != null) onClick(item.connection)
             }
         }
@@ -107,25 +135,42 @@ class ConnectionAdapter(
             binding.host.text = if (metadata.host.isNotEmpty()) "${metadata.host}:${metadata.destinationPort}" else "${metadata.destinationIP}:${metadata.destinationPort}"
             val uploadText = formatBytes(item.connection.upload)
             val downloadText = formatBytes(item.connection.download)
+            val totalText = context.getString(R.string.connections_total_format, downloadText, uploadText)
+            val ruleText = formatRuleText(item.connection)
+            val chainText = item.connection.chains.joinToString(" -> ")
+            val infoText = listOf(ruleText, chainText)
+                .filter { it.isNotBlank() }
+                .joinToString("  ")
+                .ifBlank { "N/A" }
             if (item.isActive) {
-                binding.info.text = "Rule: ${item.connection.rule} | U: $uploadText  D: $downloadText | Chain: ${item.connection.chains.joinToString(" -> ")}"
+                binding.info.text = infoText
                 binding.speedOrTotal.text = item.speed
             } else {
-                binding.info.text = "Rule: ${item.connection.rule} | U: $uploadText  D: $downloadText"
-                binding.speedOrTotal.text = "0 B/s"
+                binding.info.text = infoText
+                binding.speedOrTotal.text = "↓ 0 B/s  ↑ 0 B/s"
             }
+            binding.total.text = totalText
             binding.badge.text = if (item.isActive) "ACTIVE" else "CLOSED"
-            binding.badge.setBackgroundColor(if (item.isActive) 0xFF4CAF50.toInt() else 0xFF9E9E9E.toInt())
+            if (item.isActive) {
+                binding.badge.setBackgroundColor(
+                    MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
+                )
+                binding.badge.setTextColor(
+                    MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimary)
+                )
+            } else {
+                val onSurface = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
+                binding.badge.setBackgroundColor(ColorUtils.setAlphaComponent(onSurface, 0x1F))
+                binding.badge.setTextColor(onSurface)
+            }
         }
     }
-}
 
-private fun formatBytes(bytes: Long): String {
-    if (bytes < 1024) return "$bytes B"
-    val kb = bytes / 1024.0
-    if (kb < 1024) return String.format(java.util.Locale.US, "%.1f KB", kb)
-    val mb = kb / 1024.0
-    if (mb < 1024) return String.format(java.util.Locale.US, "%.1f MB", mb)
-    val gb = mb / 1024.0
-    return String.format(java.util.Locale.US, "%.2f GB", gb)
+    private fun formatRuleText(connection: Connection): String {
+        return when {
+            connection.rule.isBlank() -> ""
+            connection.rulePayload.isNotEmpty() -> "${connection.rule} (${connection.rulePayload})"
+            else -> connection.rule
+        }
+    }
 }

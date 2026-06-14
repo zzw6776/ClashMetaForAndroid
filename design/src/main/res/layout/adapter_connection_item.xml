@@ -55,28 +55,55 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:layout_marginEnd="8dp"
                 android:maxLines="1"
                 android:ellipsize="end"
                 android:textAppearance="?attr/textAppearanceCaption"
-                app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintEnd_toStartOf="@+id/speed_or_total"
+                app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@+id/host"
                 tools:text="Rule: Match" />
 
             <TextView
                 android:id="@+id/speed_or_total"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:layout_marginEnd="8dp"
+                android:gravity="start"
+                android:singleLine="true"
+                android:textColor="#2196F3"
+                android:textStyle="bold"
+                android:textAppearance="?attr/textAppearanceCaption"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toStartOf="@+id/total"
+                app:layout_constraintHorizontal_chainStyle="spread"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/info"
+                app:autoSizeMinTextSize="8sp"
+                app:autoSizeMaxTextSize="12sp"
+                app:autoSizeStepGranularity="1sp"
+                app:autoSizeTextType="uniform"
+                tools:text="↓ 210 KB/s ↑ 12 KB/s" />
+
+            <TextView
+                android:id="@+id/total"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
                 android:gravity="end"
+                android:singleLine="true"
                 android:textColor="#2196F3"
                 android:textStyle="bold"
                 android:textAppearance="?attr/textAppearanceCaption"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintTop_toTopOf="@+id/info"
-                tools:text="↓ 210 kB/s" />
+                app:layout_constraintStart_toEndOf="@+id/speed_or_total"
+                app:layout_constraintTop_toBottomOf="@+id/info"
+                app:autoSizeMinTextSize="8sp"
+                app:autoSizeMaxTextSize="12sp"
+                app:autoSizeStepGranularity="1sp"
+                app:autoSizeTextType="uniform"
+                tools:text="总 ↓ 1.2 MB ↑ 300 KB" />
 
         </androidx.constraintlayout.widget.ConstraintLayout>
 

@@ -29,6 +29,14 @@ subprojects {
     }
 
     val isApp = name == "app"
+    val allAbis = listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+    val localInstallAbis = providers.gradleProperty("local.install.abi")
+        .orNull
+        ?.split(",")
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        ?.takeIf { it.isNotEmpty() }
+    val buildAbis = localInstallAbis ?: allAbis
 
     apply(plugin = if (isApp) "com.android.application" else "com.android.library")
 
@@ -71,12 +79,12 @@ subprojects {
             buildConfigField("String", "BUILD_TIME", "\"$buildTime\"")
 
             ndk {
-                abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                abiFilters += buildAbis
             }
 
             externalNativeBuild {
                 cmake {
-                    abiFilters("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                    abiFilters(*buildAbis.toTypedArray())
                 }
             }
 
@@ -198,7 +206,7 @@ subprojects {
                     isEnable = true
                     isUniversalApk = true
                     reset()
-                    include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                    include(*buildAbis.toTypedArray())
                 }
             }
         }

@@ -26,7 +26,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="?attr/actionBarSize"
                 app:title="Connection Details"
-                app:navigationIcon="@android:drawable/ic_menu_close_clear_cancel" />
+                app:navigationIcon="@drawable/ic_baseline_close" />
 
         </com.google.android.material.appbar.AppBarLayout>
 
@@ -47,7 +47,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:columnCount="2"
-                    android:rowCount="7"
+                    android:rowCount="11"
                     android:useDefaultMargins="true">
 
                     <!-- Row 1: Destination / Port -->
@@ -116,7 +116,51 @@
                         <TextView android:id="@+id/tv_chain" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="US-Node-1" android:textStyle="bold"/>
                     </LinearLayout>
 
-                    <!-- Row 7: Upload / Download -->
+                    <!-- Row 7: Status / Snapshot Time -->
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Status" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_status" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="Active" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Snapshot Time" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_snapshot_time" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="12:30:45" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <!-- Row 8: Speed (Full Width) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_columnSpan="2"
+                        android:orientation="vertical"
+                        android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_speed" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="↓ 3.7 KB/s ↑ 5.9 KB/s" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <!-- Row 9: Metadata Type / Special Proxy -->
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Metadata Type" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_metadata_type" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="INNER" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Special Proxy" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_special_proxy" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="DIRECT" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <!-- Row 10: Special Rules (Full Width) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_columnSpan="2"
+                        android:orientation="vertical"
+                        android:layout_marginTop="16dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Special Rules" android:textAppearance="?attr/textAppearanceCaption" />
+                        <TextView android:id="@+id/tv_special_rules" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="sub-rule" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                    <!-- Row 11: Upload / Download -->
                     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical" android:layout_marginTop="16dp">
                         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Upload" android:textAppearance="?attr/textAppearanceCaption" />
                         <TextView android:id="@+id/tv_up" android:layout_width="wrap_content" android:layout_height="wrap_content" tools:text="5.2 MB" android:textColor="#4CAF50" android:textStyle="bold"/>
