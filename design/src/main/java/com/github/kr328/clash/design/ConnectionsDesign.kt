@@ -116,10 +116,10 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
             val popup = PopupMenu(context, view)
             popup.menu.add(0, 0, 0, context.getString(R.string.connections_sort_time))
             popup.menu.add(0, 1, 1, context.getString(R.string.connections_sort_name))
-            popup.menu.add(0, 2, 2, context.getString(R.string.connections_sort_download_speed))
-            popup.menu.add(0, 3, 3, context.getString(R.string.connections_sort_upload_speed))
-            popup.menu.add(0, 4, 4, context.getString(R.string.connections_sort_total_download))
-            popup.menu.add(0, 5, 5, context.getString(R.string.connections_sort_total_upload))
+            popup.menu.add(0, 3, 2, context.getString(R.string.connections_sort_upload_speed))
+            popup.menu.add(0, 2, 3, context.getString(R.string.connections_sort_download_speed))
+            popup.menu.add(0, 5, 4, context.getString(R.string.connections_sort_total_upload))
+            popup.menu.add(0, 4, 5, context.getString(R.string.connections_sort_total_download))
             popup.setOnMenuItemClickListener { item ->
                 sortType = when (item.itemId) {
                     1 -> SortType.NAME

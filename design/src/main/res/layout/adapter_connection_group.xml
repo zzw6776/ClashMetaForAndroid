@@ -64,7 +64,7 @@
                 app:layout_constraintEnd_toStartOf="@+id/iv_expand_icon"
                 app:layout_constraintStart_toEndOf="@+id/app_icon"
                 app:layout_constraintTop_toBottomOf="@+id/app_name"
-                tools:text="↓ 1.2 MB/s ↑ 64.0 KB/s" />
+                tools:text="↑ 64.0 KB/s ↓ 1.2 MB/s" />
 
             <TextView
                 android:id="@+id/connection_count"
@@ -79,7 +79,7 @@
                 app:layout_constraintEnd_toStartOf="@+id/iv_expand_icon"
                 app:layout_constraintStart_toEndOf="@+id/app_icon"
                 app:layout_constraintTop_toBottomOf="@+id/speed"
-                tools:text="总 ↓ 20.0 MB ↑ 3.1 MB" />
+                tools:text="总 ↑ 3.1 MB ↓ 20.0 MB" />
 
             <ImageView
                 android:id="@+id/iv_expand_icon"

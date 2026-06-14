@@ -3,6 +3,7 @@ package com.github.kr328.clash
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.model.Connection
 import com.github.kr328.clash.core.model.ConnectionDiff
+import com.github.kr328.clash.core.model.ProcessTraffic
 import com.github.kr328.clash.design.ConnectionsDesign
 import com.github.kr328.clash.design.databinding.DesignConnectionDetailsBinding
 import com.github.kr328.clash.design.util.formatBytes
@@ -38,6 +39,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         val collapsedGroups = mutableSetOf<String>()
         val closedConnectionIds = mutableSetOf<String>()
         val closedConnectionOrder = java.util.ArrayDeque<String>()
+        var processTrafficTotals = emptyMap<String, ProcessTraffic>()
         var observerRegistered = false
         var awaitingSnapshotReconcile = false
         var selectedProcessKey: String? = uiStore.connectionProcessFilter.takeIf { it.isNotBlank() }
@@ -207,9 +209,9 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             binding.tvChain.text = conn.chains.joinToString(" -> ")
             binding.tvDuration.text = formatDuration(conn.start, record, nowMillis)
             binding.tvSpeed.text = if (isClosed) {
-                "↓ 0 B/s  ↑ 0 B/s"
+                "↑ 0 B/s  ↓ 0 B/s"
             } else {
-                "↓ ${formatTraffic(connectionSpeeds[id] ?: 0L)}  ↑ ${formatTraffic(connectionUploadSpeeds[id] ?: 0L)}"
+                "↑ ${formatTraffic(connectionUploadSpeeds[id] ?: 0L)}  ↓ ${formatTraffic(connectionSpeeds[id] ?: 0L)}"
             }
             binding.tvUp.text = formatBytes(conn.upload)
             binding.tvDown.text = formatBytes(conn.download)
@@ -315,35 +317,61 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 val grouped = allDisplayRecords.groupBy {
                     normalizeProcessName(it.connection.metadata.process)
                 }
+                data class ProcessGroup(
+                    val process: String,
+                    val records: List<ConnectionRecord>
+                )
+                fun processTrafficForGroup(
+                    process: String,
+                    records: List<ConnectionRecord>
+                ): ProcessTraffic {
+                    return processTrafficTotals[process] ?: ProcessTraffic(
+                        upload = records.sumOf { it.connection.upload },
+                        download = records.sumOf { it.connection.download }
+                    )
+                }
+                val processGroups = buildList {
+                    grouped.forEach { (process, records) ->
+                        add(ProcessGroup(process, records))
+                    }
+                    if (filterClosed) {
+                        processTrafficTotals.forEach { (process, traffic) ->
+                            if (processFilter != null && process != processFilter) return@forEach
+                            if (process in grouped) return@forEach
+                            if (traffic.upload <= 0L && traffic.download <= 0L) return@forEach
+                            add(ProcessGroup(process, emptyList()))
+                        }
+                    }
+                }
 
-                val sortedGrouped = grouped.entries.sortedWith { a, b ->
+                val sortedGrouped = processGroups.sortedWith { a, b ->
                     when (sortType) {
                         ConnectionsDesign.SortType.TIME -> {
-                            val timeA = a.value.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
-                            val timeB = b.value.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
-                            timeA.compareTo(timeB).takeIf { it != 0 } ?: a.key.compareTo(b.key, ignoreCase = true)
+                            val timeA = a.records.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
+                            val timeB = b.records.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
+                            timeA.compareTo(timeB).takeIf { it != 0 } ?: a.process.compareTo(b.process, ignoreCase = true)
                         }
                         ConnectionsDesign.SortType.NAME -> {
-                            a.key.compareTo(b.key, ignoreCase = true)
+                            a.process.compareTo(b.process, ignoreCase = true)
                         }
                         ConnectionsDesign.SortType.SPEED_DOWN -> {
-                            val sumA = a.value.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
-                            val sumB = b.value.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
+                            val sumA = a.records.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
+                            val sumB = b.records.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
                             sumB.compareTo(sumA)
                         }
                         ConnectionsDesign.SortType.SPEED_UP -> {
-                            val sumA = a.value.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
-                            val sumB = b.value.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
+                            val sumA = a.records.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
+                            val sumB = b.records.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
                             sumB.compareTo(sumA)
                         }
                         ConnectionsDesign.SortType.TRAFFIC_DOWN -> {
-                            val sumA = a.value.sumOf { it.connection.download }
-                            val sumB = b.value.sumOf { it.connection.download }
+                            val sumA = processTrafficForGroup(a.process, a.records).download
+                            val sumB = processTrafficForGroup(b.process, b.records).download
                             sumB.compareTo(sumA)
                         }
                         ConnectionsDesign.SortType.TRAFFIC_UP -> {
-                            val sumA = a.value.sumOf { it.connection.upload }
-                            val sumB = b.value.sumOf { it.connection.upload }
+                            val sumA = processTrafficForGroup(a.process, a.records).upload
+                            val sumB = processTrafficForGroup(b.process, b.records).upload
                             sumB.compareTo(sumA)
                         }
                     }
@@ -351,7 +379,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
                 val items = mutableListOf<com.github.kr328.clash.design.adapter.ConnectionItem>()
 
-                for ((basePackage, connsUnsorted) in sortedGrouped) {
+                for ((basePackage, connsUnsorted) in sortedGrouped.map { it.process to it.records }) {
                     val conns = connsUnsorted.sortedWith { a, b ->
                         val connA = a.connection
                         val connB = b.connection
@@ -404,9 +432,10 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
                     val totalSpeedBytes = conns.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
                     val totalUploadSpeedBytes = conns.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
-                    val totalSpeed = "↓ ${formatTraffic(totalSpeedBytes)}  ↑ ${formatTraffic(totalUploadSpeedBytes)}"
-                    val totalUploadBytes = conns.sumOf { it.connection.upload }
-                    val totalDownloadBytes = conns.sumOf { it.connection.download }
+                    val totalSpeed = "↑ ${formatTraffic(totalUploadSpeedBytes)}  ↓ ${formatTraffic(totalSpeedBytes)}"
+                    val processTraffic = processTrafficForGroup(basePackage, conns)
+                    val totalUploadBytes = processTraffic.upload
+                    val totalDownloadBytes = processTraffic.download
 
                     val isExpanded = !collapsedGroups.contains(basePackage)
                     items.add(
@@ -428,7 +457,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             val conn = record.connection
                             val speedBytes = connectionSpeeds[conn.id] ?: 0L
                             val uploadSpeedBytes = connectionUploadSpeeds[conn.id] ?: 0L
-                            val speed = "↓ ${formatTraffic(speedBytes)}  ↑ ${formatTraffic(uploadSpeedBytes)}"
+                            val speed = "↑ ${formatTraffic(uploadSpeedBytes)}  ↓ ${formatTraffic(speedBytes)}"
                             items.add(com.github.kr328.clash.design.adapter.ConnectionItem.Child(conn, speed, !record.closed))
                         }
                     }
@@ -449,9 +478,9 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             connectionRecords.clear()
             connectionSpeeds.clear()
             connectionUploadSpeeds.clear()
-            collapsedGroups.clear()
             closedConnectionIds.clear()
             closedConnectionOrder.clear()
+            processTrafficTotals = emptyMap()
             if (resetProcessFilter) {
                 selectedProcessKey = null
                 uiStore.connectionProcessFilter = ""
@@ -463,12 +492,20 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         fun showProcessFilterMenu() {
             val options = mutableListOf<Pair<String?, String>>()
             options.add(null to getString(com.github.kr328.clash.design.R.string.connections_process_all))
-            selectedProcessKey?.let { processKey ->
-                options.add(processKey to resolveAppName(processKey))
+            val menuProcessKeys = mutableSetOf<String>()
+            connectionRecords.values.forEach { record ->
+                if (!record.closed && !design.filterActive) return@forEach
+                if (record.closed && !design.filterClosed) return@forEach
+                menuProcessKeys.add(normalizeProcessName(record.connection.metadata.process))
             }
-            connectionRecords.values
-                .map { normalizeProcessName(it.connection.metadata.process) }
-                .distinct()
+            if (design.filterClosed) {
+                processTrafficTotals.forEach { (processKey, traffic) ->
+                    if (traffic.upload > 0L || traffic.download > 0L) {
+                        menuProcessKeys.add(processKey)
+                    }
+                }
+            }
+            menuProcessKeys
                 .sortedBy { resolveAppName(it).lowercase(Locale.getDefault()) }
                 .forEach { processKey ->
                     if (options.none { it.first == processKey }) {
@@ -577,10 +614,27 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 }
                             }
                             ConnectionsDesign.Request.ToggleExpandCollapse -> {
+                                val recordGroups = connectionRecords.values
+                                    .filter { record ->
+                                        if (!record.closed && !design.filterActive) return@filter false
+                                        if (record.closed && !design.filterClosed) return@filter false
+                                        val process = normalizeProcessName(record.connection.metadata.process)
+                                        selectedProcessKey == null || process == selectedProcessKey
+                                    }
+                                    .map { normalizeProcessName(it.connection.metadata.process) }
+                                val trafficGroups = if (design.filterClosed) {
+                                    processTrafficTotals
+                                        .filter { (process, traffic) ->
+                                            (selectedProcessKey == null || process == selectedProcessKey) &&
+                                                (traffic.upload > 0L || traffic.download > 0L)
+                                        }
+                                        .keys
+                                } else {
+                                    emptySet()
+                                }
+                                val allGroups = (recordGroups + trafficGroups).toSet()
+                                collapsedGroups.retainAll(allGroups)
                                 if (collapsedGroups.isEmpty()) {
-                                    val allGroups = connectionRecords.values.map { 
-                                        normalizeProcessName(it.connection.metadata.process) 
-                                    }.toSet()
                                     collapsedGroups.addAll(allGroups)
                                 } else {
                                     collapsedGroups.clear()
@@ -594,6 +648,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
                         try {
                             val batchMillis = System.currentTimeMillis()
+                            processTrafficTotals = diff.processTraffic
                             val reconcileSnapshot = awaitingSnapshotReconcile && diff.timestamp > 0L
                             if (diff.timestamp > 0L) {
                                 awaitingSnapshotReconcile = false

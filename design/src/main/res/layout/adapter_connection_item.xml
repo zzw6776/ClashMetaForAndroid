@@ -82,7 +82,7 @@
                 app:autoSizeMaxTextSize="12sp"
                 app:autoSizeStepGranularity="1sp"
                 app:autoSizeTextType="uniform"
-                tools:text="↓ 210 KB/s ↑ 12 KB/s" />
+                tools:text="↑ 12 KB/s ↓ 210 KB/s" />
 
             <TextView
                 android:id="@+id/total"
@@ -101,7 +101,7 @@
                 app:autoSizeMaxTextSize="12sp"
                 app:autoSizeStepGranularity="1sp"
                 app:autoSizeTextType="uniform"
-                tools:text="总 ↓ 1.2 MB ↑ 300 KB" />
+                tools:text="总 ↑ 300 KB ↓ 1.2 MB" />
 
         </androidx.constraintlayout.widget.ConstraintLayout>
 

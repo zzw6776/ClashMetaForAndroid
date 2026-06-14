@@ -33,16 +33,16 @@ sealed class ConnectionItem {
     data class Child(val connection: Connection, val speed: String, val isActive: Boolean) : ConnectionItem()
 }
 
-private fun formatTotalTraffic(downloadText: String, uploadText: String): CharSequence {
-    val downStr = "Dn $downloadText"
+private fun formatTotalTraffic(uploadText: String, downloadText: String): CharSequence {
     val upStr = "Up $uploadText"
+    val downStr = "Dn $downloadText"
     val builder = SpannableStringBuilder()
-    builder.append(downStr)
-    builder.setSpan(ForegroundColorSpan(Color.parseColor("#2196F3")), 0, downStr.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    builder.append(upStr)
+    builder.setSpan(ForegroundColorSpan(Color.parseColor("#4CAF50")), 0, upStr.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     builder.append("  ")
     val start = builder.length
-    builder.append(upStr)
-    builder.setSpan(ForegroundColorSpan(Color.parseColor("#4CAF50")), start, builder.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    builder.append(downStr)
+    builder.setSpan(ForegroundColorSpan(Color.parseColor("#2196F3")), start, builder.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     return builder
 }
 
@@ -118,8 +118,8 @@ class ConnectionAdapter(
             binding.appName.text = "${item.appName} · ${item.activeCount}/${item.totalCount}"
             binding.speed.text = item.totalSpeed
             binding.connectionCount.text = formatTotalTraffic(
-                formatBytes(item.totalDownload),
-                formatBytes(item.totalUpload)
+                formatBytes(item.totalUpload),
+                formatBytes(item.totalDownload)
             )
             binding.appName.alpha = groupAlpha
             binding.speed.alpha = groupAlpha
@@ -151,7 +151,7 @@ class ConnectionAdapter(
             binding.host.text = if (metadata.host.isNotEmpty()) "${metadata.host}:${metadata.destinationPort}" else "${metadata.destinationIP}:${metadata.destinationPort}"
             val uploadText = formatBytes(item.connection.upload)
             val downloadText = formatBytes(item.connection.download)
-            val totalText = formatTotalTraffic(downloadText, uploadText)
+            val totalText = formatTotalTraffic(uploadText, downloadText)
             val ruleText = formatRuleText(item.connection)
             val chainText = item.connection.chains.joinToString(" -> ")
             val infoText = listOf(ruleText, chainText)
@@ -163,7 +163,7 @@ class ConnectionAdapter(
                 binding.speedOrTotal.text = item.speed
             } else {
                 binding.info.text = infoText
-                binding.speedOrTotal.text = "↓ 0 B/s  ↑ 0 B/s"
+                binding.speedOrTotal.text = "↑ 0 B/s  ↓ 0 B/s"
             }
             binding.total.text = totalText
             binding.badge.text = if (item.isActive) "ACTIVE" else "CLOSED"

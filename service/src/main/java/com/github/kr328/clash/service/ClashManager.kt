@@ -53,6 +53,7 @@ class ClashManager(private val context: Context) : IClashManager,
                 val pollInterval = intervalMillis.coerceIn(500L, 5000L)
                 connectionObserverJob = launch {
                     var lastConnections = emptyMap<String, Connection>()
+                    var lastProcessTraffic = emptyMap<String, ProcessTraffic>()
                     var activeTrafficIds = emptySet<String>()
                     try {
                         while (isActive) {
@@ -61,6 +62,7 @@ class ClashManager(private val context: Context) : IClashManager,
                                 if (json != null) {
                                     val snapshot = Clash.parseConnectionSnapshot(json)
                                     val currentConnections = snapshot?.connections?.associateBy { it.id } ?: emptyMap()
+                                    val currentProcessTraffic = snapshot?.processTraffic ?: emptyMap()
                                     
                                     val newConnections = mutableListOf<Connection>()
                                     val removedConnections = mutableListOf<String>()
@@ -96,12 +98,14 @@ class ClashManager(private val context: Context) : IClashManager,
                                         newConnections.isNotEmpty() ||
                                         removedConnections.isNotEmpty() ||
                                         removedConnectionDetails.isNotEmpty() ||
-                                        updatedTraffics.isNotEmpty()
+                                        updatedTraffics.isNotEmpty() ||
+                                        currentProcessTraffic != lastProcessTraffic
                                     ) {
                                         val diff = ConnectionDiff(
                                             timestamp = System.currentTimeMillis(),
                                             totalUpload = snapshot?.uploadTotal ?: 0L,
                                             totalDownload = snapshot?.downloadTotal ?: 0L,
+                                            processTraffic = currentProcessTraffic,
                                             newConnections = newConnections,
                                             removedConnections = removedConnections,
                                             removedConnectionDetails = removedConnectionDetails,
@@ -115,6 +119,7 @@ class ClashManager(private val context: Context) : IClashManager,
                                         }
                                     }
                                     lastConnections = currentConnections
+                                    lastProcessTraffic = currentProcessTraffic
                                     activeTrafficIds = changedTrafficIds
                                 }
                             } catch (e: CancellationException) {

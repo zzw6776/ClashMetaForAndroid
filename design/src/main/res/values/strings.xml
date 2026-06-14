@@ -271,7 +271,7 @@
     <string name="connections_refresh_1s">Refresh: 1s</string>
     <string name="connections_refresh_2s">Refresh: 2s</string>
     <string name="connections_refresh_5s">Refresh: 5s</string>
-    <string name="connections_total_format">Total ↓ %1$s ↑ %2$s</string>
+    <string name="connections_total_format">Total ↑ %1$s ↓ %2$s</string>
     <string name="service">Service</string>
 
     <string name="dark_mode">Dark Mode</string>

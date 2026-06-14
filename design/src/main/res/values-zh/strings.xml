@@ -135,7 +135,7 @@
     <string name="connections_refresh_1s">刷新：1秒</string>
     <string name="connections_refresh_2s">刷新：2秒</string>
     <string name="connections_refresh_5s">刷新：5秒</string>
-    <string name="connections_total_format">总 ↓ %1$s ↑ %2$s</string>
+    <string name="connections_total_format">总 ↑ %1$s ↓ %2$s</string>
     <string name="follow_system_android_10">跟随系统 (Android 10+)</string>
     <string name="always_dark">总是暗黑模式</string>
     <string name="always_light">总是明亮模式</string>

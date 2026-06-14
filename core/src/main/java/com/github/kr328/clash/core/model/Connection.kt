@@ -10,7 +10,8 @@ import kotlinx.serialization.Serializable
 data class ConnectionSnapshot(
     val uploadTotal: Long = 0,
     val downloadTotal: Long = 0,
-    val connections: List<Connection>? = emptyList()
+    val connections: List<Connection>? = emptyList(),
+    val processTraffic: Map<String, ProcessTraffic> = emptyMap()
 ) : Parcelable {
     override fun writeToParcel(parcel: Parcel, flags: Int) {
         Parcelizer.encodeToParcel(serializer(), parcel, this)
@@ -26,6 +27,30 @@ data class ConnectionSnapshot(
         }
 
         override fun newArray(size: Int): Array<ConnectionSnapshot?> {
+            return arrayOfNulls(size)
+        }
+    }
+}
+
+@Serializable
+data class ProcessTraffic(
+    val upload: Long = 0,
+    val download: Long = 0
+) : Parcelable {
+    override fun writeToParcel(parcel: Parcel, flags: Int) {
+        Parcelizer.encodeToParcel(serializer(), parcel, this)
+    }
+
+    override fun describeContents(): Int {
+        return 0
+    }
+
+    companion object CREATOR : Parcelable.Creator<ProcessTraffic> {
+        override fun createFromParcel(parcel: Parcel): ProcessTraffic {
+            return Parcelizer.decodeFromParcel(serializer(), parcel)
+        }
+
+        override fun newArray(size: Int): Array<ProcessTraffic?> {
             return arrayOfNulls(size)
         }
     }
