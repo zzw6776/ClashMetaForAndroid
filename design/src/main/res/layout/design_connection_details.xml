@@ -129,7 +129,7 @@
 
                             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_columnWeight="1" android:orientation="vertical">
                                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Proxy Chain" android:textAppearance="?attr/textAppearanceCaption" />
-                                <TextView android:id="@+id/tv_chain" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="US-Node-1" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="1" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
+                                <TextView android:id="@+id/tv_chain" android:layout_width="match_parent" android:layout_height="wrap_content" tools:text="US-Node-1" android:textStyle="bold" android:textAppearance="?attr/textAppearanceBody2" android:maxLines="2" app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp" app:autoSizeMaxTextSize="14sp" android:textIsSelectable="true"/>
                             </LinearLayout>
 
                         </GridLayout>

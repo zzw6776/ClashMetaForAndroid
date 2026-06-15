@@ -33,6 +33,7 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
     }
 
     val binding = DesignConnectionsBinding.inflate(context.layoutInflater, context.root, false)
+    private var statusFilterPopup: PopupWindow? = null
     private val trackingSwitch = SwitchMaterial(context).apply {
         text = null
         contentDescription = context.getString(R.string.connections_tracking)
@@ -166,18 +167,27 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
     }
 
     private fun showStatusFilterWindow(anchor: View) {
+        statusFilterPopup?.dismiss()
         val density = context.resources.displayMetrics.density
+        // 将 LinearLayout 的水平 padding 设为 0，使 CheckBox 的点击波纹（Ripple）能平滑铺满至边缘，与系统菜单一致
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding((12 * density).toInt(), (8 * density).toInt(), (12 * density).toInt(), (8 * density).toInt())
+            setPadding(0, (8 * density).toInt(), 0, (8 * density).toInt())
         }
 
         fun addOption(label: String, checked: Boolean, onChanged: (Boolean) -> Unit) {
-            val checkBox = CheckBox(context).apply {
+            // 使用 MaterialCheckBox 确保与 Material Design 风格一致
+            val checkBox = com.google.android.material.checkbox.MaterialCheckBox(context).apply {
                 text = label
                 isChecked = checked
-                minWidth = (160 * density).toInt()
-                setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
+                // 调整最小宽度为 200dp，高度为 48dp（系统菜单默认高度），使其宽度与“代理节点”基本一致
+                minWidth = (200 * density).toInt()
+                minHeight = (48 * density).toInt()
+                // 设置左右内边距为 16dp，文本和图标之间的距离为 12dp
+                setPadding((16 * density).toInt(), 0, (16 * density).toInt(), 0)
+                compoundDrawablePadding = (12 * density).toInt()
+                // 提升字体大小到 16sp，保持与 PopupMenu 一致
+                textSize = 16f
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -201,12 +211,14 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
             uiStore.connectionFilterFailed = it
         }
 
-        PopupWindow(context).apply {
+        val popup = PopupWindow(context).apply {
             contentView = content
             width = ViewGroup.LayoutParams.WRAP_CONTENT
             height = ViewGroup.LayoutParams.WRAP_CONTENT
             isFocusable = true
             isOutsideTouchable = true
+            // 显式在 PopupWindow 级别设置 elevation，在 Android 5.0+ 下会绘制物理轮廓阴影，与系统的 PopupMenu 一致
+            elevation = 8 * density
 
             val shapeDrawable = com.google.android.material.shape.MaterialShapeDrawable(
                 com.google.android.material.shape.ShapeAppearanceModel.builder()
@@ -220,8 +232,23 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
             }
             setBackgroundDrawable(shapeDrawable)
 
+            val attachListener = object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) {}
+                override fun onViewDetachedFromWindow(v: View) {
+                    dismiss()
+                }
+            }
+            binding.root.addOnAttachStateChangeListener(attachListener)
+            setOnDismissListener {
+                binding.root.removeOnAttachStateChangeListener(attachListener)
+                if (statusFilterPopup == this) {
+                    statusFilterPopup = null
+                }
+            }
+
             showAsDropDown(anchor)
         }
+        statusFilterPopup = popup
     }
 
     private fun updateStatusFilterLabel() {

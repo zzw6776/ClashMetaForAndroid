@@ -42,6 +42,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         val collapsedGroups = mutableSetOf<String>()
         val closedConnectionIds = mutableSetOf<String>()
         val closedConnectionOrder = java.util.ArrayDeque<String>()
+        val failedConnectionOrder = java.util.ArrayDeque<String>()
         var processTrafficTotals = emptyMap<String, ProcessTraffic>()
         var observerRegistered = false
         var awaitingSnapshotReconcile = false
@@ -183,11 +184,9 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     connectionUploadSpeeds.remove(expiredId)
                 }
             }
-            if (failedConnectionRecords.size > MAX_FAILED_CONNECTIONS) {
-                failedConnectionRecords.entries
-                    .sortedBy { it.value.failedAtMillis ?: Long.MAX_VALUE }
-                    .take(failedConnectionRecords.size - MAX_FAILED_CONNECTIONS)
-                    .forEach { failedConnectionRecords.remove(it.key) }
+            while (failedConnectionRecords.size > MAX_FAILED_CONNECTIONS && failedConnectionOrder.isNotEmpty()) {
+                val expiredId = failedConnectionOrder.removeFirst()
+                failedConnectionRecords.remove(expiredId)
             }
         }
 
@@ -253,7 +252,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             binding.tvCountry.text = if (countryCode.isNotEmpty()) "$countryCode $flag" else "Unknown"
 
             binding.tvRule.text = formatRuleText(conn)
-            binding.tvChain.text = conn.chains.orEmpty().joinToString(" -> ")
+            binding.tvChain.text = conn.chains.orEmpty().filter { it.isNotBlank() }.reversed().joinToString(" -> ")
             binding.tvDuration.text = if (record != null) {
                 formatDuration(conn.start, record, nowMillis)
             } else {
@@ -570,11 +569,11 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         fun clearConnectionList(resetProcessFilter: Boolean = true) {
             connectionRecords.clear()
             failedConnectionRecords.clear()
+            failedConnectionOrder.clear()
             connectionSpeeds.clear()
             connectionUploadSpeeds.clear()
             closedConnectionIds.clear()
             closedConnectionOrder.clear()
-            processTrafficTotals = emptyMap()
             if (resetProcessFilter) {
                 selectedProcessKey = null
                 selectedProxyKey = null
@@ -826,6 +825,9 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
                             for (failed in diff.newFailedConnections) {
                                 if (failed.id.isBlank()) continue
+                                if (!failedConnectionRecords.containsKey(failed.id)) {
+                                    failedConnectionOrder.addLast(failed.id)
+                                }
                                 failedConnectionRecords[failed.id] = FailedConnectionRecord(
                                     failedConnection = failed,
                                     failedAtMillis = parseConnectionStartMillis(failed.failedAt)
