@@ -37,6 +37,7 @@ data class ConnectionDiff(
     val totalDownload: Long = 0,
     val processTraffic: Map<String, ProcessTraffic> = emptyMap(),
     val newConnections: List<Connection> = emptyList(),
+    val newFailedConnections: List<FailedConnection> = emptyList(),
     val removedConnections: List<String> = emptyList(),
     val removedConnectionDetails: List<Connection> = emptyList(),
     val updatedTraffics: List<ConnectionTraffic> = emptyList()

@@ -3,8 +3,10 @@ package com.github.kr328.clash
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.model.Connection
 import com.github.kr328.clash.core.model.ConnectionDiff
+import com.github.kr328.clash.core.model.FailedConnection
 import com.github.kr328.clash.core.model.ProcessTraffic
 import com.github.kr328.clash.design.ConnectionsDesign
+import com.github.kr328.clash.design.adapter.ConnectionStatus
 import com.github.kr328.clash.design.databinding.DesignConnectionDetailsBinding
 import com.github.kr328.clash.design.util.formatBytes
 import com.github.kr328.clash.design.util.formatTraffic
@@ -32,6 +34,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         setContentDesign(design)
 
         val connectionRecords = mutableMapOf<String, ConnectionRecord>()
+        val failedConnectionRecords = mutableMapOf<String, FailedConnectionRecord>()
         val connectionSpeeds = mutableMapOf<String, Long>()
         val connectionUploadSpeeds = mutableMapOf<String, Long>()
         val packageNames = mutableMapOf<String, String>()
@@ -43,6 +46,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         var observerRegistered = false
         var awaitingSnapshotReconcile = false
         var selectedProcessKey: String? = uiStore.connectionProcessFilter.takeIf { it.isNotBlank() }
+        var selectedProxyKey: String? = uiStore.connectionProxyFilter.takeIf { it.isNotBlank() }
         var detailsBinding: DesignConnectionDetailsBinding? = null
         var detailsConnectionId: String? = null
         val clockTimeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
@@ -69,6 +73,9 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
         selectedProcessKey?.let {
             design.setProcessFilterLabel(resolveAppName(it))
+        }
+        selectedProxyKey?.let {
+            design.setProxyFilterLabel(it)
         }
 
         fun parseConnectionStartMillis(start: String): Long? {
@@ -137,6 +144,36 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             }
         }
 
+        fun proxyNamesFor(connection: Connection): Set<String> {
+            return buildSet {
+                addAll(connection.chains.filter { it.isNotBlank() })
+                connection.metadata.specialProxy.takeIf { it.isNotBlank() }?.let { add(it) }
+            }
+        }
+
+        fun proxyNamesFor(failed: FailedConnection): Set<String> {
+            return buildSet {
+                addAll(failed.chains.filter { it.isNotBlank() })
+                failed.proxy.takeIf { it.isNotBlank() }?.let { add(it) }
+                failed.metadata.specialProxy.takeIf { it.isNotBlank() }?.let { add(it) }
+            }
+        }
+
+        fun FailedConnection.toDisplayConnection(): Connection {
+            val displayChains = chains.ifEmpty {
+                listOfNotNull(proxy.takeIf { it.isNotBlank() })
+            }
+            return Connection(
+                id = id,
+                metadata = metadata,
+                start = failedAt,
+                chains = displayChains,
+                providerChains = providerChains,
+                rule = rule,
+                rulePayload = rulePayload
+            )
+        }
+
         fun pruneClosedConnections() {
             while (closedConnectionIds.size > MAX_CLOSED_CONNECTIONS && closedConnectionOrder.isNotEmpty()) {
                 val expiredId = closedConnectionOrder.removeFirst()
@@ -145,6 +182,12 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     connectionSpeeds.remove(expiredId)
                     connectionUploadSpeeds.remove(expiredId)
                 }
+            }
+            if (failedConnectionRecords.size > MAX_FAILED_CONNECTIONS) {
+                failedConnectionRecords.entries
+                    .sortedBy { it.value.failedAtMillis ?: Long.MAX_VALUE }
+                    .take(failedConnectionRecords.size - MAX_FAILED_CONNECTIONS)
+                    .forEach { failedConnectionRecords.remove(it.key) }
             }
         }
 
@@ -179,10 +222,14 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         }
 
         fun updateConnectionDetails(binding: DesignConnectionDetailsBinding, id: String) {
-            val record = connectionRecords[id] ?: return
-            val conn = record.connection
+            val record = connectionRecords[id]
+            val failedRecord = failedConnectionRecords[id]
+            if (record == null && failedRecord == null) return
+
+            val conn = record?.connection ?: failedRecord!!.failedConnection.toDisplayConnection()
             val meta = conn.metadata
-            val isClosed = record.closed
+            val isFailed = failedRecord != null && record == null
+            val isClosed = record?.closed == true
             val nowMillis = System.currentTimeMillis()
 
             binding.tvDest.text = meta.host.ifEmpty { meta.destinationIP }
@@ -207,8 +254,12 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
             binding.tvRule.text = formatRuleText(conn)
             binding.tvChain.text = conn.chains.joinToString(" -> ")
-            binding.tvDuration.text = formatDuration(conn.start, record, nowMillis)
-            binding.tvSpeed.text = if (isClosed) {
+            binding.tvDuration.text = if (record != null) {
+                formatDuration(conn.start, record, nowMillis)
+            } else {
+                "N/A"
+            }
+            binding.tvSpeed.text = if (isClosed || isFailed) {
                 "↑ 0 B/s  ↓ 0 B/s"
             } else {
                 "↑ ${formatTraffic(connectionUploadSpeeds[id] ?: 0L)}  ↓ ${formatTraffic(connectionSpeeds[id] ?: 0L)}"
@@ -216,17 +267,25 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             binding.tvUp.text = formatBytes(conn.upload)
             binding.tvDown.text = formatBytes(conn.download)
             binding.tvStatus.text = getString(
-                if (isClosed) {
+                if (isFailed) {
+                    com.github.kr328.clash.design.R.string.failed
+                } else if (isClosed) {
                     com.github.kr328.clash.design.R.string.closed
                 } else {
                     com.github.kr328.clash.design.R.string.active
                 }
             )
-            binding.tvSnapshotTime.text = formatConnectionTimeRange(record, nowMillis)
+            binding.tvSnapshotTime.text = if (record != null) {
+                formatConnectionTimeRange(record, nowMillis)
+            } else {
+                failedRecord?.failedConnection?.failedAt?.ifBlank { "N/A" } ?: "N/A"
+            }
             binding.tvMetadataType.text = meta.type.ifBlank { "N/A" }
-            binding.tvSpecialProxy.text = meta.specialProxy.ifBlank { "N/A" }
-            binding.tvSpecialRules.text = meta.specialRules.ifBlank { "N/A" }
-            binding.btnCloseConnection.isEnabled = !isClosed
+            binding.tvSpecialProxy.text = failedRecord?.failedConnection?.proxy?.takeIf { it.isNotBlank() }
+                ?: meta.specialProxy.ifBlank { "N/A" }
+            binding.tvSpecialRules.text = failedRecord?.failedConnection?.error?.takeIf { it.isNotBlank() }
+                ?: meta.specialRules.ifBlank { "N/A" }
+            binding.btnCloseConnection.isEnabled = !isClosed && !isFailed
         }
 
         val diffChannel = Channel<ConnectionDiff>(Channel.UNLIMITED)
@@ -304,14 +363,41 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             try {
                 val filterActive = design.filterActive
                 val filterClosed = design.filterClosed
+                val filterFailed = design.filterFailed
                 val sortType = design.sortType
                 val processFilter = selectedProcessKey
+                val proxyFilter = selectedProxyKey
 
-                val allDisplayRecords = connectionRecords.values.filter { record ->
-                    if (!record.closed && !filterActive) return@filter false
-                    if (record.closed && !filterClosed) return@filter false
-                    if (processFilter != null && normalizeProcessName(record.connection.metadata.process) != processFilter) return@filter false
-                    true
+                data class DisplayRecord(
+                    val connection: Connection,
+                    val status: ConnectionStatus,
+                    val startMillis: Long?,
+                    val error: String? = null
+                )
+
+                val allDisplayRecords = mutableListOf<DisplayRecord>()
+                connectionRecords.values.forEach { record ->
+                    val status = if (record.closed) ConnectionStatus.CLOSED else ConnectionStatus.ACTIVE
+                    if (status == ConnectionStatus.ACTIVE && !filterActive) return@forEach
+                    if (status == ConnectionStatus.CLOSED && !filterClosed) return@forEach
+                    if (processFilter != null && normalizeProcessName(record.connection.metadata.process) != processFilter) return@forEach
+                    if (proxyFilter != null && proxyFilter !in proxyNamesFor(record.connection)) return@forEach
+                    allDisplayRecords.add(DisplayRecord(record.connection, status, record.startMillis))
+                }
+                if (filterFailed) {
+                    failedConnectionRecords.values.forEach { record ->
+                        val failed = record.failedConnection
+                        if (processFilter != null && normalizeProcessName(failed.metadata.process) != processFilter) return@forEach
+                        if (proxyFilter != null && proxyFilter !in proxyNamesFor(failed)) return@forEach
+                        allDisplayRecords.add(
+                            DisplayRecord(
+                                failed.toDisplayConnection(),
+                                ConnectionStatus.FAILED,
+                                record.failedAtMillis,
+                                failed.error
+                            )
+                        )
+                    }
                 }
 
                 val grouped = allDisplayRecords.groupBy {
@@ -319,22 +405,23 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 }
                 data class ProcessGroup(
                     val process: String,
-                    val records: List<ConnectionRecord>
+                    val records: List<DisplayRecord>
                 )
                 fun processTrafficForGroup(
                     process: String,
-                    records: List<ConnectionRecord>
+                    records: List<DisplayRecord>
                 ): ProcessTraffic {
                     return processTrafficTotals[process] ?: ProcessTraffic(
                         upload = records.sumOf { it.connection.upload },
                         download = records.sumOf { it.connection.download }
                     )
                 }
+
                 val processGroups = buildList {
                     grouped.forEach { (process, records) ->
                         add(ProcessGroup(process, records))
                     }
-                    if (filterClosed) {
+                    if (filterClosed && proxyFilter == null) {
                         processTrafficTotals.forEach { (process, traffic) ->
                             if (processFilter != null && process != processFilter) return@forEach
                             if (process in grouped) return@forEach
@@ -347,13 +434,11 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 val sortedGrouped = processGroups.sortedWith { a, b ->
                     when (sortType) {
                         ConnectionsDesign.SortType.TIME -> {
-                            val timeA = a.records.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
-                            val timeB = b.records.minOfOrNull { connectionStartSortKey(it) } ?: Long.MAX_VALUE
+                            val timeA = a.records.minOfOrNull { it.startMillis ?: Long.MAX_VALUE } ?: Long.MAX_VALUE
+                            val timeB = b.records.minOfOrNull { it.startMillis ?: Long.MAX_VALUE } ?: Long.MAX_VALUE
                             timeA.compareTo(timeB).takeIf { it != 0 } ?: a.process.compareTo(b.process, ignoreCase = true)
                         }
-                        ConnectionsDesign.SortType.NAME -> {
-                            a.process.compareTo(b.process, ignoreCase = true)
-                        }
+                        ConnectionsDesign.SortType.NAME -> a.process.compareTo(b.process, ignoreCase = true)
                         ConnectionsDesign.SortType.SPEED_DOWN -> {
                             val sumA = a.records.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
                             val sumB = b.records.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
@@ -378,14 +463,13 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 }
 
                 val items = mutableListOf<com.github.kr328.clash.design.adapter.ConnectionItem>()
-
                 for ((basePackage, connsUnsorted) in sortedGrouped.map { it.process to it.records }) {
                     val conns = connsUnsorted.sortedWith { a, b ->
                         val connA = a.connection
                         val connB = b.connection
                         when (sortType) {
                             ConnectionsDesign.SortType.TIME -> {
-                                val timeCompare = connectionStartSortKey(a).compareTo(connectionStartSortKey(b))
+                                val timeCompare = (a.startMillis ?: Long.MAX_VALUE).compareTo(b.startMillis ?: Long.MAX_VALUE)
                                 if (timeCompare != 0) {
                                     timeCompare
                                 } else {
@@ -414,7 +498,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                         }
                     }
 
-                    val activeCount = conns.count { !it.closed }
+                    val activeCount = conns.count { it.status == ConnectionStatus.ACTIVE }
                     val appName = resolveAppName(basePackage)
                     val appIcon = packageIcons.getOrPut("icon_$basePackage") {
                         try {
@@ -434,8 +518,6 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     val totalUploadSpeedBytes = conns.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
                     val totalSpeed = "↑ ${formatTraffic(totalUploadSpeedBytes)}  ↓ ${formatTraffic(totalSpeedBytes)}"
                     val processTraffic = processTrafficForGroup(basePackage, conns)
-                    val totalUploadBytes = processTraffic.upload
-                    val totalDownloadBytes = processTraffic.download
 
                     val isExpanded = !collapsedGroups.contains(basePackage)
                     items.add(
@@ -446,8 +528,8 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             activeCount = activeCount,
                             totalCount = conns.size,
                             totalSpeed = totalSpeed,
-                            totalUpload = totalUploadBytes,
-                            totalDownload = totalDownloadBytes,
+                            totalUpload = processTraffic.upload,
+                            totalDownload = processTraffic.download,
                             isExpanded = isExpanded
                         )
                     )
@@ -458,7 +540,14 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             val speedBytes = connectionSpeeds[conn.id] ?: 0L
                             val uploadSpeedBytes = connectionUploadSpeeds[conn.id] ?: 0L
                             val speed = "↑ ${formatTraffic(uploadSpeedBytes)}  ↓ ${formatTraffic(speedBytes)}"
-                            items.add(com.github.kr328.clash.design.adapter.ConnectionItem.Child(conn, speed, !record.closed))
+                            items.add(
+                                com.github.kr328.clash.design.adapter.ConnectionItem.Child(
+                                    conn,
+                                    speed,
+                                    record.status,
+                                    record.error
+                                )
+                            )
                         }
                     }
                 }
@@ -476,6 +565,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
         fun clearConnectionList(resetProcessFilter: Boolean = true) {
             connectionRecords.clear()
+            failedConnectionRecords.clear()
             connectionSpeeds.clear()
             connectionUploadSpeeds.clear()
             closedConnectionIds.clear()
@@ -483,8 +573,11 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             processTrafficTotals = emptyMap()
             if (resetProcessFilter) {
                 selectedProcessKey = null
+                selectedProxyKey = null
                 uiStore.connectionProcessFilter = ""
+                uiStore.connectionProxyFilter = ""
                 design.setProcessFilterLabel(null)
+                design.setProxyFilterLabel(null)
             }
             adapter.submitList(emptyList())
         }
@@ -496,9 +589,17 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             connectionRecords.values.forEach { record ->
                 if (!record.closed && !design.filterActive) return@forEach
                 if (record.closed && !design.filterClosed) return@forEach
+                if (selectedProxyKey != null && selectedProxyKey !in proxyNamesFor(record.connection)) return@forEach
                 menuProcessKeys.add(normalizeProcessName(record.connection.metadata.process))
             }
-            if (design.filterClosed) {
+            if (design.filterFailed) {
+                failedConnectionRecords.values.forEach { record ->
+                    val failed = record.failedConnection
+                    if (selectedProxyKey != null && selectedProxyKey !in proxyNamesFor(failed)) return@forEach
+                    menuProcessKeys.add(normalizeProcessName(failed.metadata.process))
+                }
+            }
+            if (design.filterClosed && selectedProxyKey == null) {
                 processTrafficTotals.forEach { (processKey, traffic) ->
                     if (traffic.upload > 0L || traffic.download > 0L) {
                         menuProcessKeys.add(processKey)
@@ -522,6 +623,45 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 selectedProcessKey = option.first
                 uiStore.connectionProcessFilter = option.first.orEmpty()
                 design.setProcessFilterLabel(option.second)
+                refreshConnectionList()
+                true
+            }
+            popup.show()
+        }
+
+        fun showProxyFilterMenu() {
+            val options = mutableListOf<Pair<String?, String>>()
+            options.add(null to getString(com.github.kr328.clash.design.R.string.connections_proxy_all))
+            val proxyNames = mutableSetOf<String>()
+            connectionRecords.values.forEach { record ->
+                if (!record.closed && !design.filterActive) return@forEach
+                if (record.closed && !design.filterClosed) return@forEach
+                if (selectedProcessKey != null && normalizeProcessName(record.connection.metadata.process) != selectedProcessKey) return@forEach
+                proxyNames.addAll(proxyNamesFor(record.connection))
+            }
+            if (design.filterFailed) {
+                failedConnectionRecords.values.forEach { record ->
+                    val failed = record.failedConnection
+                    if (selectedProcessKey != null && normalizeProcessName(failed.metadata.process) != selectedProcessKey) return@forEach
+                    proxyNames.addAll(proxyNamesFor(failed))
+                }
+            }
+            proxyNames
+                .filter { it.isNotBlank() }
+                .sortedWith(String.CASE_INSENSITIVE_ORDER)
+                .forEach { proxyName ->
+                    options.add(proxyName to proxyName)
+                }
+
+            val popup = PopupMenu(this@ConnectionsActivity, design.binding.chipProxy)
+            options.forEachIndexed { index, option ->
+                popup.menu.add(0, index, index, option.second)
+            }
+            popup.setOnMenuItemClickListener { item ->
+                val option = options.getOrNull(item.itemId) ?: return@setOnMenuItemClickListener true
+                selectedProxyKey = option.first
+                uiStore.connectionProxyFilter = option.first.orEmpty()
+                design.setProxyFilterLabel(option.second)
                 refreshConnectionList()
                 true
             }
@@ -600,10 +740,9 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 clearConnectionList(resetProcessFilter = false)
                                 registerObserver(force = true)
                             }
-                            ConnectionsDesign.Request.FilterChanged -> {
-                                refreshConnectionList()
-                            }
+                            ConnectionsDesign.Request.FilterChanged -> refreshConnectionList()
                             ConnectionsDesign.Request.ProcessFilterClicked -> showProcessFilterMenu()
+                            ConnectionsDesign.Request.ProxyFilterClicked -> showProxyFilterMenu()
                             ConnectionsDesign.Request.RefreshIntervalChanged -> registerObserver(force = true)
                             ConnectionsDesign.Request.TrackingChanged -> {
                                 if (design.trackingEnabled) {
@@ -619,10 +758,23 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                         if (!record.closed && !design.filterActive) return@filter false
                                         if (record.closed && !design.filterClosed) return@filter false
                                         val process = normalizeProcessName(record.connection.metadata.process)
-                                        selectedProcessKey == null || process == selectedProcessKey
+                                        (selectedProcessKey == null || process == selectedProcessKey) &&
+                                            (selectedProxyKey == null || selectedProxyKey in proxyNamesFor(record.connection))
                                     }
                                     .map { normalizeProcessName(it.connection.metadata.process) }
-                                val trafficGroups = if (design.filterClosed) {
+                                val failedGroups = if (design.filterFailed) {
+                                    failedConnectionRecords.values
+                                        .filter { record ->
+                                            val failed = record.failedConnection
+                                            val process = normalizeProcessName(failed.metadata.process)
+                                            (selectedProcessKey == null || process == selectedProcessKey) &&
+                                                (selectedProxyKey == null || selectedProxyKey in proxyNamesFor(failed))
+                                        }
+                                        .map { normalizeProcessName(it.failedConnection.metadata.process) }
+                                } else {
+                                    emptyList()
+                                }
+                                val trafficGroups = if (design.filterClosed && selectedProxyKey == null) {
                                     processTrafficTotals
                                         .filter { (process, traffic) ->
                                             (selectedProcessKey == null || process == selectedProcessKey) &&
@@ -632,7 +784,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 } else {
                                     emptySet()
                                 }
-                                val allGroups = (recordGroups + trafficGroups).toSet()
+                                val allGroups = (recordGroups + failedGroups + trafficGroups).toSet()
                                 collapsedGroups.retainAll(allGroups)
                                 if (collapsedGroups.isEmpty()) {
                                     collapsedGroups.addAll(allGroups)
@@ -665,6 +817,14 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 connectionRecords[conn.id] = ConnectionRecord(
                                     connection = conn,
                                     startMillis = parseConnectionStartMillis(conn.start)
+                                )
+                            }
+
+                            for (failed in diff.newFailedConnections) {
+                                if (failed.id.isBlank()) continue
+                                failedConnectionRecords[failed.id] = FailedConnectionRecord(
+                                    failedConnection = failed,
+                                    failedAtMillis = parseConnectionStartMillis(failed.failedAt)
                                 )
                             }
 
@@ -740,9 +900,15 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         }
     }
 
+    private data class FailedConnectionRecord(
+        var failedConnection: FailedConnection,
+        var failedAtMillis: Long?
+    )
+
     companion object {
         private const val UNKNOWN_PACKAGE = "Unknown"
         private const val MAX_CLOSED_CONNECTIONS = 1000
+        private const val MAX_FAILED_CONNECTIONS = 1000
         private const val MAX_REASONABLE_SPEED_BYTES_PER_SECOND = 10L * 1024L * 1024L * 1024L
         private const val REMOTE_CALL_TIMEOUT_MILLIS = 3_000L
 

@@ -98,6 +98,11 @@ class UiStore(context: Context) {
         defaultValue = true
     )
 
+    var connectionFilterFailed: Boolean by store.boolean(
+        key = "connection_filter_failed",
+        defaultValue = true
+    )
+
     var connectionSortType: Int by store.int(
         key = "connection_sort_type",
         defaultValue = 0
@@ -105,6 +110,11 @@ class UiStore(context: Context) {
 
     var connectionProcessFilter: String by store.string(
         key = "connection_process_filter",
+        defaultValue = ""
+    )
+
+    var connectionProxyFilter: String by store.string(
+        key = "connection_proxy_filter",
         defaultValue = ""
     )
 

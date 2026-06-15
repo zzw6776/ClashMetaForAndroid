@@ -1,9 +1,15 @@
 package com.github.kr328.clash.design
 
 import android.content.Context
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
+import android.widget.CheckBox
+import android.widget.LinearLayout
 import android.widget.PopupMenu
+import android.widget.PopupWindow
 import com.github.kr328.clash.design.databinding.DesignConnectionsBinding
 import com.github.kr328.clash.design.store.UiStore
 import com.github.kr328.clash.design.util.layoutInflater
@@ -16,6 +22,7 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         ClearConnections,
         FilterChanged,
         ProcessFilterClicked,
+        ProxyFilterClicked,
         RefreshIntervalChanged,
         TrackingChanged,
         ToggleExpandCollapse
@@ -35,10 +42,13 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         private set
 
     val filterActive: Boolean
-        get() = binding.chipActive.isChecked
+        get() = uiStore.connectionFilterActive
 
     val filterClosed: Boolean
-        get() = binding.chipClosed.isChecked
+        get() = uiStore.connectionFilterClosed
+
+    val filterFailed: Boolean
+        get() = uiStore.connectionFilterFailed
 
     val refreshIntervalMillis: Long
         get() = uiStore.connectionRefreshIntervalMillis.toLong()
@@ -89,8 +99,7 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         binding.recyclerView.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(context)
 
         trackingSwitch.isChecked = uiStore.connectionTrackingEnabled
-        binding.chipActive.isChecked = uiStore.connectionFilterActive
-        binding.chipClosed.isChecked = uiStore.connectionFilterClosed
+        updateStatusFilterLabel()
         binding.chipSort.text = sortTypeLabel(sortType)
         setTrackingControlsEnabled(trackingSwitch.isChecked)
 
@@ -100,16 +109,14 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
             requests.trySend(Request.TrackingChanged)
         }
 
-        binding.chipActive.setOnCheckedChangeListener { _, _ ->
-            uiStore.connectionFilterActive = binding.chipActive.isChecked
-            requests.trySend(Request.FilterChanged)
-        }
-        binding.chipClosed.setOnCheckedChangeListener { _, _ ->
-            uiStore.connectionFilterClosed = binding.chipClosed.isChecked
-            requests.trySend(Request.FilterChanged)
+        binding.chipStatus.setOnClickListener {
+            showStatusFilterWindow(binding.chipStatus)
         }
         binding.chipProcess.setOnClickListener {
             requests.trySend(Request.ProcessFilterClicked)
+        }
+        binding.chipProxy.setOnClickListener {
+            requests.trySend(Request.ProxyFilterClicked)
         }
 
         binding.chipSort.setOnClickListener { view ->
@@ -143,15 +150,81 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         binding.chipProcess.text = label?.takeIf { it.isNotBlank() } ?: context.getString(R.string.connections_process_all)
     }
 
+    fun setProxyFilterLabel(label: String?) {
+        binding.chipProxy.text = label?.takeIf { it.isNotBlank() } ?: context.getString(R.string.connections_proxy_all)
+    }
+
     fun setAdapter(adapter: androidx.recyclerview.widget.RecyclerView.Adapter<*>) {
         binding.recyclerView.adapter = adapter
     }
 
     private fun setTrackingControlsEnabled(enabled: Boolean) {
-        binding.chipActive.isEnabled = enabled
-        binding.chipClosed.isEnabled = enabled
+        binding.chipStatus.isEnabled = enabled
         binding.chipProcess.isEnabled = enabled
+        binding.chipProxy.isEnabled = enabled
         binding.chipSort.isEnabled = enabled
+    }
+
+    private fun showStatusFilterWindow(anchor: View) {
+        val density = context.resources.displayMetrics.density
+        val content = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((12 * density).toInt(), (8 * density).toInt(), (12 * density).toInt(), (8 * density).toInt())
+        }
+
+        fun addOption(label: String, checked: Boolean, onChanged: (Boolean) -> Unit) {
+            val checkBox = CheckBox(context).apply {
+                text = label
+                isChecked = checked
+                minWidth = (160 * density).toInt()
+                setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                setOnCheckedChangeListener { _, isChecked ->
+                    onChanged(isChecked)
+                    updateStatusFilterLabel()
+                    requests.trySend(Request.FilterChanged)
+                }
+            }
+            content.addView(checkBox)
+        }
+
+        addOption(context.getString(R.string.connections_filter_active_short), uiStore.connectionFilterActive) {
+            uiStore.connectionFilterActive = it
+        }
+        addOption(context.getString(R.string.connections_filter_closed_short), uiStore.connectionFilterClosed) {
+            uiStore.connectionFilterClosed = it
+        }
+        addOption(context.getString(R.string.connections_filter_failed_short), uiStore.connectionFilterFailed) {
+            uiStore.connectionFilterFailed = it
+        }
+
+        PopupWindow(
+            content,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true
+        ).apply {
+            isOutsideTouchable = true
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            elevation = 8 * density
+            showAsDropDown(anchor)
+        }
+    }
+
+    private fun updateStatusFilterLabel() {
+        val selected = listOfNotNull(
+            context.getString(R.string.connections_filter_active_short).takeIf { uiStore.connectionFilterActive },
+            context.getString(R.string.connections_filter_closed_short).takeIf { uiStore.connectionFilterClosed },
+            context.getString(R.string.connections_filter_failed_short).takeIf { uiStore.connectionFilterFailed }
+        )
+        binding.chipStatus.text = when (selected.size) {
+            3 -> context.getString(R.string.connections_status_all)
+            1, 2 -> selected.joinToString(", ")
+            else -> context.getString(R.string.connections_status_count, 0)
+        }
     }
 
     private fun showRefreshMenu(anchor: View, refreshItem: MenuItem) {

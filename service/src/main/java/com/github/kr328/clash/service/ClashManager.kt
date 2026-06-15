@@ -54,6 +54,7 @@ class ClashManager(private val context: Context) : IClashManager,
                 connectionObserverJob = launch {
                     var lastConnections = emptyMap<String, Connection>()
                     var lastProcessTraffic = emptyMap<String, ProcessTraffic>()
+                    var lastFailedConnectionIds = emptySet<String>()
                     var activeTrafficIds = emptySet<String>()
                     try {
                         while (isActive) {
@@ -63,13 +64,16 @@ class ClashManager(private val context: Context) : IClashManager,
                                     val snapshot = Clash.parseConnectionSnapshot(json)
                                     val currentConnections = snapshot?.connections?.associateBy { it.id } ?: emptyMap()
                                     val currentProcessTraffic = snapshot?.processTraffic ?: emptyMap()
-                                    
+                                    val currentFailedConnections = snapshot?.failedConnections ?: emptyList()
+                                    val currentFailedConnectionIds = currentFailedConnections.mapTo(mutableSetOf()) { it.id }
+
                                     val newConnections = mutableListOf<Connection>()
+                                    val newFailedConnections = currentFailedConnections.filter { it.id !in lastFailedConnectionIds }
                                     val removedConnections = mutableListOf<String>()
                                     val removedConnectionDetails = mutableListOf<Connection>()
                                     val updatedTraffics = mutableListOf<ConnectionTraffic>()
                                     val changedTrafficIds = mutableSetOf<String>()
-                                    
+
                                     for ((id, conn) in currentConnections) {
                                         val last = lastConnections[id]
                                         if (last == null) {
@@ -86,16 +90,17 @@ class ClashManager(private val context: Context) : IClashManager,
                                             }
                                         }
                                     }
-                                    
+
                                     for ((id, conn) in lastConnections) {
                                         if (!currentConnections.containsKey(id)) {
                                             removedConnections.add(id)
                                             removedConnectionDetails.add(conn)
                                         }
                                     }
-                                    
+
                                     if (
                                         newConnections.isNotEmpty() ||
+                                        newFailedConnections.isNotEmpty() ||
                                         removedConnections.isNotEmpty() ||
                                         removedConnectionDetails.isNotEmpty() ||
                                         updatedTraffics.isNotEmpty() ||
@@ -107,6 +112,7 @@ class ClashManager(private val context: Context) : IClashManager,
                                             totalDownload = snapshot?.downloadTotal ?: 0L,
                                             processTraffic = currentProcessTraffic,
                                             newConnections = newConnections,
+                                            newFailedConnections = newFailedConnections,
                                             removedConnections = removedConnections,
                                             removedConnectionDetails = removedConnectionDetails,
                                             updatedTraffics = updatedTraffics
@@ -120,6 +126,7 @@ class ClashManager(private val context: Context) : IClashManager,
                                     }
                                     lastConnections = currentConnections
                                     lastProcessTraffic = currentProcessTraffic
+                                    lastFailedConnectionIds = currentFailedConnectionIds
                                     activeTrafficIds = changedTrafficIds
                                 }
                             } catch (e: CancellationException) {

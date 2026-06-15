@@ -30,7 +30,18 @@ sealed class ConnectionItem {
         val totalDownload: Long,
         val isExpanded: Boolean
     ) : ConnectionItem()
-    data class Child(val connection: Connection, val speed: String, val isActive: Boolean) : ConnectionItem()
+    data class Child(
+        val connection: Connection,
+        val speed: String,
+        val status: ConnectionStatus,
+        val error: String? = null
+    ) : ConnectionItem()
+}
+
+enum class ConnectionStatus {
+    ACTIVE,
+    CLOSED,
+    FAILED
 }
 
 private fun formatTotalTraffic(uploadText: String, downloadText: String): CharSequence {
@@ -154,11 +165,15 @@ class ConnectionAdapter(
             val totalText = formatTotalTraffic(uploadText, downloadText)
             val ruleText = formatRuleText(item.connection)
             val chainText = item.connection.chains.joinToString(" -> ")
-            val infoText = listOf(ruleText, chainText)
+            val infoText = if (item.status == ConnectionStatus.FAILED) {
+                item.error?.takeIf { it.isNotBlank() } ?: context.getString(R.string.failed)
+            } else {
+                listOf(ruleText, chainText)
                 .filter { it.isNotBlank() }
                 .joinToString("  ")
                 .ifBlank { "N/A" }
-            if (item.isActive) {
+            }
+            if (item.status == ConnectionStatus.ACTIVE) {
                 binding.info.text = infoText
                 binding.speedOrTotal.text = item.speed
             } else {
@@ -166,18 +181,25 @@ class ConnectionAdapter(
                 binding.speedOrTotal.text = "↑ 0 B/s  ↓ 0 B/s"
             }
             binding.total.text = totalText
-            binding.badge.text = if (item.isActive) "ACTIVE" else "CLOSED"
-            if (item.isActive) {
-                binding.badge.setBackgroundColor(
-                    MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
-                )
-                binding.badge.setTextColor(
-                    MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimary)
-                )
-            } else {
-                val onSurface = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
-                binding.badge.setBackgroundColor(ColorUtils.setAlphaComponent(onSurface, 0x1F))
-                binding.badge.setTextColor(onSurface)
+            binding.badge.text = item.status.name
+            when (item.status) {
+                ConnectionStatus.ACTIVE -> {
+                    binding.badge.setBackgroundColor(
+                        MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
+                    )
+                    binding.badge.setTextColor(
+                        MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimary)
+                    )
+                }
+                ConnectionStatus.CLOSED -> {
+                    val onSurface = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
+                    binding.badge.setBackgroundColor(ColorUtils.setAlphaComponent(onSurface, 0x1F))
+                    binding.badge.setTextColor(onSurface)
+                }
+                ConnectionStatus.FAILED -> {
+                    binding.badge.setBackgroundColor(Color.parseColor("#B3261E"))
+                    binding.badge.setTextColor(Color.WHITE)
+                }
             }
         }
     }

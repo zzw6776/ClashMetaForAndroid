@@ -255,10 +255,15 @@
     <string name="connections_tracking">Tracking</string>
     <string name="active">Active</string>
     <string name="closed">Closed</string>
+    <string name="failed">Failed</string>
     <string name="connections_clear">Clear</string>
     <string name="connections_filter_active_short">Active</string>
     <string name="connections_filter_closed_short">Closed</string>
+    <string name="connections_filter_failed_short">Failed</string>
+    <string name="connections_status_all">All Status</string>
+    <string name="connections_status_count">%d Statuses</string>
     <string name="connections_process_all">Process</string>
+    <string name="connections_proxy_all">Proxy</string>
     <string name="connections_sort_format">Sort: %s</string>
     <string name="connections_sort_time_selected">Sort: Time</string>
     <string name="connections_sort_time">Time</string>

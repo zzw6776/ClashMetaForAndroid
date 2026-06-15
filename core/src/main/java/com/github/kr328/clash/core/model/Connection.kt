@@ -11,6 +11,7 @@ data class ConnectionSnapshot(
     val uploadTotal: Long = 0,
     val downloadTotal: Long = 0,
     val connections: List<Connection>? = emptyList(),
+    val failedConnections: List<FailedConnection> = emptyList(),
     val processTraffic: Map<String, ProcessTraffic> = emptyMap()
 ) : Parcelable {
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -27,6 +28,37 @@ data class ConnectionSnapshot(
         }
 
         override fun newArray(size: Int): Array<ConnectionSnapshot?> {
+            return arrayOfNulls(size)
+        }
+    }
+}
+
+@Serializable
+data class FailedConnection(
+    val id: String = "",
+    val metadata: Metadata = Metadata(),
+    val failedAt: String = "",
+    val chains: List<String> = emptyList(),
+    val providerChains: List<String> = emptyList(),
+    val rule: String = "",
+    val rulePayload: String = "",
+    val proxy: String = "",
+    val error: String = ""
+) : Parcelable {
+    override fun writeToParcel(parcel: Parcel, flags: Int) {
+        Parcelizer.encodeToParcel(serializer(), parcel, this)
+    }
+
+    override fun describeContents(): Int {
+        return 0
+    }
+
+    companion object CREATOR : Parcelable.Creator<FailedConnection> {
+        override fun createFromParcel(parcel: Parcel): FailedConnection {
+            return Parcelizer.decodeFromParcel(serializer(), parcel)
+        }
+
+        override fun newArray(size: Int): Array<FailedConnection?> {
             return arrayOfNulls(size)
         }
     }
