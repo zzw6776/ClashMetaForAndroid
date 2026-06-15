@@ -201,15 +201,25 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
             uiStore.connectionFilterFailed = it
         }
 
-        PopupWindow(
-            content,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            true
-        ).apply {
+        PopupWindow(context).apply {
+            contentView = content
+            width = ViewGroup.LayoutParams.WRAP_CONTENT
+            height = ViewGroup.LayoutParams.WRAP_CONTENT
+            isFocusable = true
             isOutsideTouchable = true
-            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            elevation = 8 * density
+
+            val shapeDrawable = com.google.android.material.shape.MaterialShapeDrawable(
+                com.google.android.material.shape.ShapeAppearanceModel.builder()
+                    .setAllCornerSizes(8 * density)
+                    .build()
+            ).apply {
+                fillColor = android.content.res.ColorStateList.valueOf(
+                    com.google.android.material.color.MaterialColors.getColor(anchor, com.google.android.material.R.attr.colorSurface)
+                )
+                elevation = 8 * density
+            }
+            setBackgroundDrawable(shapeDrawable)
+
             showAsDropDown(anchor)
         }
     }

@@ -260,7 +260,7 @@
     <string name="connections_filter_active_short">Active</string>
     <string name="connections_filter_closed_short">Closed</string>
     <string name="connections_filter_failed_short">Failed</string>
-    <string name="connections_status_all">All Status</string>
+    <string name="connections_status_all">Status</string>
     <string name="connections_status_count">%d Statuses</string>
     <string name="connections_process_all">Process</string>
     <string name="connections_proxy_all">Proxy</string>

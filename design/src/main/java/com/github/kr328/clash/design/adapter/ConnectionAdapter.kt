@@ -164,7 +164,7 @@ class ConnectionAdapter(
             val downloadText = formatBytes(item.connection.download)
             val totalText = formatTotalTraffic(uploadText, downloadText)
             val ruleText = formatRuleText(item.connection)
-            val chainText = item.connection.chains.joinToString(" -> ")
+            val chainText = item.connection.chains.orEmpty().joinToString(" -> ")
             val infoText = if (item.status == ConnectionStatus.FAILED) {
                 item.error?.takeIf { it.isNotBlank() } ?: context.getString(R.string.failed)
             } else {

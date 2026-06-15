@@ -124,7 +124,7 @@
     <string name="connections_filter_active_short">活跃</string>
     <string name="connections_filter_closed_short">已关闭</string>
     <string name="connections_filter_failed_short">失败</string>
-    <string name="connections_status_all">全部状态</string>
+    <string name="connections_status_all">状态</string>
     <string name="connections_status_count">%d 个状态</string>
     <string name="connections_process_all">进程</string>
     <string name="connections_proxy_all">代理节点</string>

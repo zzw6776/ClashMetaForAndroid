@@ -50,7 +50,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         var detailsBinding: DesignConnectionDetailsBinding? = null
         var detailsConnectionId: String? = null
         val clockTimeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-        lateinit var refreshConnectionList: () -> Unit
+        lateinit var refreshConnectionList: (scrollToTop: Boolean) -> Unit
 
         fun normalizeProcessName(process: String?): String {
             return process?.substringBefore(":")?.takeIf { it.isNotBlank() } ?: UNKNOWN_PACKAGE
@@ -146,21 +146,21 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
         fun proxyNamesFor(connection: Connection): Set<String> {
             return buildSet {
-                addAll(connection.chains.filter { it.isNotBlank() })
+                addAll(connection.chains.orEmpty().filter { it.isNotBlank() })
                 connection.metadata.specialProxy.takeIf { it.isNotBlank() }?.let { add(it) }
             }
         }
 
         fun proxyNamesFor(failed: FailedConnection): Set<String> {
             return buildSet {
-                addAll(failed.chains.filter { it.isNotBlank() })
+                addAll(failed.chains.orEmpty().filter { it.isNotBlank() })
                 failed.proxy.takeIf { it.isNotBlank() }?.let { add(it) }
                 failed.metadata.specialProxy.takeIf { it.isNotBlank() }?.let { add(it) }
             }
         }
 
         fun FailedConnection.toDisplayConnection(): Connection {
-            val displayChains = chains.ifEmpty {
+            val displayChains = chains.orEmpty().ifEmpty {
                 listOfNotNull(proxy.takeIf { it.isNotBlank() })
             }
             return Connection(
@@ -253,7 +253,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             binding.tvCountry.text = if (countryCode.isNotEmpty()) "$countryCode $flag" else "Unknown"
 
             binding.tvRule.text = formatRuleText(conn)
-            binding.tvChain.text = conn.chains.joinToString(" -> ")
+            binding.tvChain.text = conn.chains.orEmpty().joinToString(" -> ")
             binding.tvDuration.text = if (record != null) {
                 formatDuration(conn.start, record, nowMillis)
             } else {
@@ -298,7 +298,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 } else {
                     collapsedGroups.add(packageName)
                 }
-                refreshConnectionList()
+                refreshConnectionList(false)
             },
             onClick = { conn ->
                 val binding = DesignConnectionDetailsBinding.inflate(layoutInflater)
@@ -359,7 +359,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         )
         design.setAdapter(adapter)
 
-        refreshConnectionList = {
+        refreshConnectionList = { scrollToTop ->
             try {
                 val filterActive = design.filterActive
                 val filterClosed = design.filterClosed
@@ -552,7 +552,11 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     }
                 }
 
-                adapter.submitList(items)
+                adapter.submitList(items) {
+                    if (scrollToTop) {
+                        design.binding.recyclerView.scrollToPosition(0)
+                    }
+                }
                 detailsBinding?.let { binding ->
                     detailsConnectionId?.let { id ->
                         updateConnectionDetails(binding, id)
@@ -623,7 +627,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 selectedProcessKey = option.first
                 uiStore.connectionProcessFilter = option.first.orEmpty()
                 design.setProcessFilterLabel(option.second)
-                refreshConnectionList()
+                refreshConnectionList(true)
                 true
             }
             popup.show()
@@ -662,7 +666,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 selectedProxyKey = option.first
                 uiStore.connectionProxyFilter = option.first.orEmpty()
                 design.setProxyFilterLabel(option.second)
-                refreshConnectionList()
+                refreshConnectionList(true)
                 true
             }
             popup.show()
@@ -740,7 +744,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 clearConnectionList(resetProcessFilter = false)
                                 registerObserver(force = true)
                             }
-                            ConnectionsDesign.Request.FilterChanged -> refreshConnectionList()
+                            ConnectionsDesign.Request.FilterChanged -> refreshConnectionList(true)
                             ConnectionsDesign.Request.ProcessFilterClicked -> showProcessFilterMenu()
                             ConnectionsDesign.Request.ProxyFilterClicked -> showProxyFilterMenu()
                             ConnectionsDesign.Request.RefreshIntervalChanged -> registerObserver(force = true)
@@ -791,7 +795,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 } else {
                                     collapsedGroups.clear()
                                 }
-                                refreshConnectionList()
+                                refreshConnectionList(false)
                             }
                         }
                     }
@@ -870,7 +874,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 }
                             }
 
-                            refreshConnectionList()
+                            refreshConnectionList(false)
                         } catch (e: Exception) {
                             Log.w("Failed to update connections UI", e)
                         }
