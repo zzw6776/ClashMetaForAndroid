@@ -7,4 +7,14 @@
         <item name="colorControlNormal">@color/color_error</item>
         <item name="android:textColor">@color/color_error</item>
     </style>
+
+    <style name="ConnectionsToolbarTheme" parent="ThemeOverlay.AppCompat.ActionBar">
+        <item name="actionButtonStyle">@style/ConnectionsToolbarActionButton</item>
+    </style>
+
+    <style name="ConnectionsToolbarActionButton" parent="Widget.AppCompat.ActionButton">
+        <item name="android:minWidth">36dp</item>
+        <item name="android:paddingStart">6dp</item>
+        <item name="android:paddingEnd">6dp</item>
+    </style>
 </resources>

@@ -39,6 +39,9 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         contentDescription = context.getString(R.string.connections_tracking)
     }
 
+    private lateinit var expandCollapseItem: MenuItem
+    private lateinit var mergeDomainsItem: MenuItem
+
     var sortType: SortType = sortTypeFromStore(uiStore.connectionSortType)
         private set
 
@@ -76,9 +79,15 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         clearItem.setIcon(R.drawable.ic_baseline_clear_all)
         clearItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
 
-        val expandCollapseItem = binding.toolbar.menu.add(0, TOOLBAR_EXPAND_COLLAPSE_ID, 3, "展开/收起")
+        expandCollapseItem = binding.toolbar.menu.add(0, TOOLBAR_EXPAND_COLLAPSE_ID, 3, "展开/收起")
         expandCollapseItem.setIcon(R.drawable.ic_baseline_unfold_more)
         expandCollapseItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+
+        mergeDomainsItem = binding.toolbar.menu.add(0, TOOLBAR_MERGE_DOMAINS_ID, 4, "合并同域名")
+        mergeDomainsItem.setIcon(R.drawable.ic_baseline_stack)
+        mergeDomainsItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+
+        updateMergeDomainsIconState()
 
         binding.toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
@@ -92,6 +101,12 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
                 }
                 TOOLBAR_EXPAND_COLLAPSE_ID -> {
                     requests.trySend(Request.ToggleExpandCollapse)
+                    true
+                }
+                TOOLBAR_MERGE_DOMAINS_ID -> {
+                    uiStore.connectionMergeDomains = !uiStore.connectionMergeDomains
+                    updateMergeDomainsIconState()
+                    requests.trySend(Request.FilterChanged)
                     true
                 }
                 else -> false
@@ -307,11 +322,45 @@ class ConnectionsDesign(context: Context, private val uiStore: UiStore) : Design
         }
     }
 
+    fun updateMergeDomainsIconState() {
+        val isMerged = uiStore.connectionMergeDomains
+        val iconRes = if (isMerged) {
+            R.drawable.ic_baseline_stack
+        } else {
+            R.drawable.ic_baseline_stack_expanded
+        }
+        val colorAttr = if (isMerged) {
+            com.google.android.material.R.attr.colorPrimary
+        } else {
+            com.google.android.material.R.attr.colorControlNormal
+        }
+        val color = com.google.android.material.color.MaterialColors.getColor(context, colorAttr, if (isMerged) Color.BLUE else Color.GRAY)
+        val icon = androidx.core.content.ContextCompat.getDrawable(context, iconRes)
+        if (icon != null) {
+            val wrapped = androidx.core.graphics.drawable.DrawableCompat.wrap(icon.mutate())
+            androidx.core.graphics.drawable.DrawableCompat.setTint(wrapped, color)
+            mergeDomainsItem.icon = wrapped
+        }
+    }
+
+    fun updateExpandCollapseIconState(allCollapsed: Boolean) {
+        val iconRes = if (allCollapsed) {
+            R.drawable.ic_baseline_unfold_less
+        } else {
+            R.drawable.ic_baseline_unfold_more
+        }
+        val icon = androidx.core.content.ContextCompat.getDrawable(context, iconRes)
+        if (icon != null) {
+            expandCollapseItem.icon = icon
+        }
+    }
+
     companion object {
         private const val TOOLBAR_TRACKING_ID = 1
         private const val TOOLBAR_REFRESH_ID = 2
         private const val TOOLBAR_CLEAR_ID = 3
         private const val TOOLBAR_EXPAND_COLLAPSE_ID = 4
+        private const val TOOLBAR_MERGE_DOMAINS_ID = 5
         private val REFRESH_INTERVALS = intArrayOf(500, 1000, 2000, 5000)
 
         private fun sortTypeFromStore(value: Int): SortType {

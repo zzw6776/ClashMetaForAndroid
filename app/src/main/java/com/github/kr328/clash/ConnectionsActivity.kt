@@ -35,11 +35,13 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
         val connectionRecords = mutableMapOf<String, ConnectionRecord>()
         val failedConnectionRecords = mutableMapOf<String, FailedConnectionRecord>()
+        val mergedConnectionRecords = mutableMapOf<String, ConnectionRecord>()
         val connectionSpeeds = mutableMapOf<String, Long>()
         val connectionUploadSpeeds = mutableMapOf<String, Long>()
         val packageNames = mutableMapOf<String, String>()
         val packageIcons = mutableMapOf<String, android.graphics.drawable.Drawable?>()
         val collapsedGroups = mutableSetOf<String>()
+        design.updateExpandCollapseIconState(collapsedGroups.isNotEmpty())
         val closedConnectionIds = mutableSetOf<String>()
         val closedConnectionOrder = java.util.ArrayDeque<String>()
         val failedConnectionOrder = java.util.ArrayDeque<String>()
@@ -221,7 +223,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         }
 
         fun updateConnectionDetails(binding: DesignConnectionDetailsBinding, id: String) {
-            val record = connectionRecords[id]
+            val record = mergedConnectionRecords[id] ?: connectionRecords[id]
             val failedRecord = failedConnectionRecords[id]
             if (record == null && failedRecord == null) return
 
@@ -340,7 +342,24 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     this@ConnectionsActivity.launch(Dispatchers.IO) {
                         withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
                             com.github.kr328.clash.util.withClash {
-                                closeConnection(conn.id)
+                                if (conn.id.startsWith("merged|")) {
+                                    val parts = conn.id.split("|")
+                                    if (parts.size >= 4) {
+                                        val basePkg = parts[1]
+                                        val hostK = parts[2]
+                                        connectionRecords.values.forEach { record ->
+                                            if (!record.closed) {
+                                                val pkg = normalizeProcessName(record.connection.metadata.process)
+                                                val hk = record.connection.metadata.host.ifEmpty { record.connection.metadata.destinationIP }
+                                                if (pkg == basePkg && hk == hostK) {
+                                                    closeConnection(record.connection.id)
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    closeConnection(conn.id)
+                                }
                             }
                         }
                     }
@@ -360,6 +379,8 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
         refreshConnectionList = { scrollToTop ->
             try {
+                mergedConnectionRecords.clear()
+
                 val filterActive = design.filterActive
                 val filterClosed = design.filterClosed
                 val filterFailed = design.filterFailed
@@ -371,7 +392,8 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     val connection: Connection,
                     val status: ConnectionStatus,
                     val startMillis: Long?,
-                    val error: String? = null
+                    val error: String? = null,
+                    val count: Int = 1
                 )
 
                 val allDisplayRecords = mutableListOf<DisplayRecord>()
@@ -463,7 +485,59 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
                 val items = mutableListOf<com.github.kr328.clash.design.adapter.ConnectionItem>()
                 for ((basePackage, connsUnsorted) in sortedGrouped.map { it.process to it.records }) {
-                    val conns = connsUnsorted.sortedWith { a, b ->
+                    val processedRecords = if (uiStore.connectionMergeDomains) {
+                        val mergedMap = mutableMapOf<String, MutableList<DisplayRecord>>()
+                        for (rec in connsUnsorted) {
+                            val hostKey = rec.connection.metadata.host.ifEmpty { rec.connection.metadata.destinationIP }
+                            val key = "${hostKey}|${rec.status.name}"
+                            mergedMap.getOrPut(key) { mutableListOf() }.add(rec)
+                        }
+                        mergedMap.map { (key, recordList) ->
+                            if (recordList.size == 1) {
+                                recordList[0]
+                            } else {
+                                val firstRecord = recordList[0]
+                                val totalUpload = recordList.sumOf { it.connection.upload }
+                                val totalDownload = recordList.sumOf { it.connection.download }
+                                val hostKey = firstRecord.connection.metadata.host.ifEmpty { firstRecord.connection.metadata.destinationIP }
+                                val mergedId = "merged|${basePackage}|${hostKey}|${firstRecord.status.name}"
+                                val totalSpeedBytes = recordList.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
+                                val totalUploadSpeedBytes = recordList.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
+                                connectionSpeeds[mergedId] = totalSpeedBytes
+                                connectionUploadSpeeds[mergedId] = totalUploadSpeedBytes
+                                val mergedConnection = firstRecord.connection.copy(
+                                    id = mergedId,
+                                    upload = totalUpload,
+                                    download = totalDownload
+                                )
+                                val earliestStartMillis = recordList.mapNotNull { it.startMillis }.minOrNull()
+                                val latestClosedMillis = recordList.mapNotNull { r ->
+                                    if (r.status == ConnectionStatus.CLOSED) {
+                                        connectionRecords[r.connection.id]?.closedMillis
+                                    } else {
+                                        null
+                                    }
+                                }.maxOrNull()
+                                val virtualRecord = ConnectionRecord(
+                                    connection = mergedConnection,
+                                    startMillis = earliestStartMillis,
+                                    closedMillis = latestClosedMillis
+                                )
+                                mergedConnectionRecords[mergedId] = virtualRecord
+                                DisplayRecord(
+                                    connection = mergedConnection,
+                                    status = firstRecord.status,
+                                    startMillis = earliestStartMillis,
+                                    error = firstRecord.error,
+                                    count = recordList.size
+                                )
+                            }
+                        }
+                    } else {
+                        connsUnsorted
+                    }
+
+                    val conns = processedRecords.sortedWith { a, b ->
                         val connA = a.connection
                         val connB = b.connection
                         when (sortType) {
@@ -516,7 +590,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     val totalSpeedBytes = conns.sumOf { connectionSpeeds[it.connection.id] ?: 0L }
                     val totalUploadSpeedBytes = conns.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
                     val totalSpeed = "↑ ${formatTraffic(totalUploadSpeedBytes)}  ↓ ${formatTraffic(totalSpeedBytes)}"
-                    val processTraffic = processTrafficForGroup(basePackage, conns)
+                    val processTraffic = processTrafficForGroup(basePackage, conns.map { DisplayRecord(it.connection, it.status, it.startMillis, it.error) })
 
                     val isExpanded = !collapsedGroups.contains(basePackage)
                     items.add(
@@ -541,10 +615,11 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             val speed = "↑ ${formatTraffic(uploadSpeedBytes)}  ↓ ${formatTraffic(speedBytes)}"
                             items.add(
                                 com.github.kr328.clash.design.adapter.ConnectionItem.Child(
-                                    conn,
-                                    speed,
-                                    record.status,
-                                    record.error
+                                    connection = conn,
+                                    speed = speed,
+                                    status = record.status,
+                                    error = record.error,
+                                    count = record.count
                                 )
                             )
                         }
@@ -556,6 +631,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                         design.binding.recyclerView.scrollToPosition(0)
                     }
                 }
+                design.updateExpandCollapseIconState(collapsedGroups.isNotEmpty())
                 detailsBinding?.let { binding ->
                     detailsConnectionId?.let { id ->
                         updateConnectionDetails(binding, id)
@@ -568,6 +644,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
         fun clearConnectionList(resetProcessFilter: Boolean = true) {
             connectionRecords.clear()
+            mergedConnectionRecords.clear()
             failedConnectionRecords.clear()
             failedConnectionOrder.clear()
             connectionSpeeds.clear()
@@ -626,6 +703,34 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 selectedProcessKey = option.first
                 uiStore.connectionProcessFilter = option.first.orEmpty()
                 design.setProcessFilterLabel(option.second)
+                
+                if (selectedProcessKey != null && selectedProxyKey != null) {
+                    val availableProxies = mutableSetOf<String>()
+                    connectionRecords.values.forEach { record ->
+                        val status = if (record.closed) ConnectionStatus.CLOSED else ConnectionStatus.ACTIVE
+                        if (status == ConnectionStatus.ACTIVE && !design.filterActive) return@forEach
+                        if (status == ConnectionStatus.CLOSED && !design.filterClosed) return@forEach
+                        val proc = normalizeProcessName(record.connection.metadata.process)
+                        if (proc == selectedProcessKey) {
+                            availableProxies.addAll(proxyNamesFor(record.connection))
+                        }
+                    }
+                    if (design.filterFailed) {
+                        failedConnectionRecords.values.forEach { record ->
+                            val failed = record.failedConnection
+                            val proc = normalizeProcessName(failed.metadata.process)
+                            if (proc == selectedProcessKey) {
+                                availableProxies.addAll(proxyNamesFor(failed))
+                            }
+                        }
+                    }
+                    if (!availableProxies.contains(selectedProxyKey)) {
+                        selectedProxyKey = null
+                        uiStore.connectionProxyFilter = ""
+                        design.setProxyFilterLabel(null)
+                    }
+                }
+                
                 refreshConnectionList(true)
                 true
             }

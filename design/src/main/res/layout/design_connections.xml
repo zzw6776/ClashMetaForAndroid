@@ -22,19 +22,15 @@
             android:paddingTop="@{self.surface.insets.top}"
             app:elevation="0dp">
 
-            <com.google.android.material.appbar.CollapsingToolbarLayout
+            <androidx.appcompat.widget.Toolbar
+                android:id="@+id/toolbar"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:layout_scrollFlags="scroll|enterAlways">
-
-                <androidx.appcompat.widget.Toolbar
-                    android:id="@+id/toolbar"
-                    android:layout_width="match_parent"
-                    android:layout_height="?actionBarSize"
-                    app:title="@string/connections"
-                    app:navigationIcon="@drawable/ic_baseline_arrow_back" />
-
-            </com.google.android.material.appbar.CollapsingToolbarLayout>
+                android:layout_height="?actionBarSize"
+                app:title="@string/connections"
+                app:navigationIcon="@drawable/ic_baseline_arrow_back"
+                app:layout_scrollFlags="scroll|enterAlways"
+                app:theme="@style/ConnectionsToolbarTheme"
+                android:paddingEnd="16dp" />
 
             <HorizontalScrollView
                 android:layout_width="match_parent"

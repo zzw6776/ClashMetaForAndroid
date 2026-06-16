@@ -34,7 +34,8 @@ sealed class ConnectionItem {
         val connection: Connection,
         val speed: String,
         val status: ConnectionStatus,
-        val error: String? = null
+        val error: String? = null,
+        val count: Int = 1
     ) : ConnectionItem()
 }
 
@@ -182,6 +183,12 @@ class ConnectionAdapter(
             }
             binding.total.text = totalText
             binding.badge.text = item.status.name
+            if (item.count > 1) {
+                binding.count.text = "(${item.count})"
+                binding.count.visibility = android.view.View.VISIBLE
+            } else {
+                binding.count.visibility = android.view.View.GONE
+            }
             when (item.status) {
                 ConnectionStatus.ACTIVE -> {
                     binding.badge.setBackgroundColor(

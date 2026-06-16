@@ -108,6 +108,11 @@ class UiStore(context: Context) {
         defaultValue = 0
     )
 
+    var connectionMergeDomains: Boolean by store.boolean(
+        key = "connection_merge_domains",
+        defaultValue = false
+    )
+
     var connectionProcessFilter: String by store.string(
         key = "connection_process_filter",
         defaultValue = ""
