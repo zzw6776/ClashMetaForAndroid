@@ -215,6 +215,23 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeQueryConnections(JNIEnv *en
 }
 
 JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeSetConnectionHistoryEnabled(JNIEnv *env,
+                                                                                 jobject thiz,
+                                                                                 jboolean enabled) {
+    TRACE_METHOD();
+
+    setConnectionHistoryEnabled((int) enabled);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeIsConnectionHistoryEnabled(JNIEnv *env,
+                                                                                jobject thiz) {
+    TRACE_METHOD();
+
+    return (jboolean) isConnectionHistoryEnabled();
+}
+
+JNIEXPORT void JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeCloseConnection(JNIEnv *env, jobject thiz,
                                                                      jstring id) {
     TRACE_METHOD();

@@ -116,6 +116,19 @@ func queryConnections() *C.char {
 	return marshalJson(snapshot)
 }
 
+//export setConnectionHistoryEnabled
+func setConnectionHistoryEnabled(enabled C.int) {
+	tunnel.SetConnectionHistoryEnabled(enabled != 0)
+}
+
+//export isConnectionHistoryEnabled
+func isConnectionHistoryEnabled() C.int {
+	if tunnel.ConnectionHistoryEnabled() {
+		return 1
+	}
+	return 0
+}
+
 //export closeConnection
 func closeConnection(id C.c_string) {
 	cId := C.GoString(id)

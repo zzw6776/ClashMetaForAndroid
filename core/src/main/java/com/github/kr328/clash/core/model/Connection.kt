@@ -8,11 +8,12 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class ConnectionSnapshot(
-    val uploadTotal: Long = 0,
-    val downloadTotal: Long = 0,
-    val connections: List<Connection>? = emptyList(),
-    val failedConnections: List<FailedConnection> = emptyList(),
-    val processTraffic: Map<String, ProcessTraffic> = emptyMap()
+	val uploadTotal: Long = 0,
+	val downloadTotal: Long = 0,
+	val connections: List<Connection>? = emptyList(),
+	val closedConnections: List<Connection> = emptyList(),
+	val failedConnections: List<FailedConnection> = emptyList(),
+	val processTraffic: Map<String, ProcessTraffic> = emptyMap()
 ) : Parcelable {
     override fun writeToParcel(parcel: Parcel, flags: Int) {
         Parcelizer.encodeToParcel(serializer(), parcel, this)

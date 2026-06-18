@@ -49,11 +49,12 @@ class ClashManager(private val context: Context) : IClashManager,
             connectionObserverJob?.cancel()
             connectionObserverJob = null
 
-            if (observer != null) {
+            if (observer != null && Clash.isConnectionHistoryEnabled()) {
                 val pollInterval = intervalMillis.coerceIn(500L, 5000L)
                 connectionObserverJob = launch {
                     var lastConnections = emptyMap<String, Connection>()
                     var lastProcessTraffic = emptyMap<String, ProcessTraffic>()
+                    var lastClosedConnectionIds = emptySet<String>()
                     var lastFailedConnectionIds = emptySet<String>()
                     var activeTrafficIds = emptySet<String>()
                     try {
@@ -64,15 +65,21 @@ class ClashManager(private val context: Context) : IClashManager,
                                     val snapshot = Clash.parseConnectionSnapshot(json)
                                     val currentConnections = snapshot?.connections?.associateBy { it.id } ?: emptyMap()
                                     val currentProcessTraffic = snapshot?.processTraffic ?: emptyMap()
+                                    val currentClosedConnections = snapshot?.closedConnections ?: emptyList()
+                                    val currentClosedConnectionIds = currentClosedConnections.mapTo(mutableSetOf()) { it.id }
                                     val currentFailedConnections = snapshot?.failedConnections ?: emptyList()
                                     val currentFailedConnectionIds = currentFailedConnections.mapTo(mutableSetOf()) { it.id }
 
                                     val newConnections = mutableListOf<Connection>()
                                     val newFailedConnections = currentFailedConnections.filter { it.id !in lastFailedConnectionIds }
                                     val removedConnections = mutableListOf<String>()
-                                    val removedConnectionDetails = mutableListOf<Connection>()
+                                    val removedConnectionDetails = currentClosedConnections
+                                        .filter { it.id !in lastClosedConnectionIds }
+                                        .toMutableList()
                                     val updatedTraffics = mutableListOf<ConnectionTraffic>()
                                     val changedTrafficIds = mutableSetOf<String>()
+                                    val removedConnectionDetailIds = removedConnectionDetails
+                                        .mapTo(mutableSetOf()) { it.id }
 
                                     for ((id, conn) in currentConnections) {
                                         val last = lastConnections[id]
@@ -94,7 +101,9 @@ class ClashManager(private val context: Context) : IClashManager,
                                     for ((id, conn) in lastConnections) {
                                         if (!currentConnections.containsKey(id)) {
                                             removedConnections.add(id)
-                                            removedConnectionDetails.add(conn)
+                                            if (removedConnectionDetailIds.add(id)) {
+                                                removedConnectionDetails.add(conn)
+                                            }
                                         }
                                     }
 
@@ -126,6 +135,7 @@ class ClashManager(private val context: Context) : IClashManager,
                                     }
                                     lastConnections = currentConnections
                                     lastProcessTraffic = currentProcessTraffic
+                                    lastClosedConnectionIds = currentClosedConnectionIds
                                     lastFailedConnectionIds = currentFailedConnectionIds
                                     activeTrafficIds = changedTrafficIds
                                 }
@@ -142,6 +152,35 @@ class ClashManager(private val context: Context) : IClashManager,
                 }
             }
         }
+    }
+
+    override fun setConnectionHistoryEnabled(enabled: Boolean) {
+        if (!enabled) {
+            setConnectionObserver(null, 0L)
+        }
+        Clash.setConnectionHistoryEnabled(enabled)
+    }
+
+    override fun isConnectionHistoryEnabled(): Boolean {
+        return Clash.isConnectionHistoryEnabled()
+    }
+
+    override fun queryConnectionHistory(): ConnectionDiff {
+        val snapshot = Clash.queryConnectionSnapshot()
+        val active = snapshot?.connections.orEmpty()
+        val closed = snapshot?.closedConnections.orEmpty()
+        val failed = snapshot?.failedConnections.orEmpty()
+        return ConnectionDiff(
+            timestamp = System.currentTimeMillis(),
+            totalUpload = snapshot?.uploadTotal ?: 0L,
+            totalDownload = snapshot?.downloadTotal ?: 0L,
+            processTraffic = snapshot?.processTraffic ?: emptyMap(),
+            newConnections = active,
+            newFailedConnections = failed,
+            removedConnections = closed.map { it.id },
+            removedConnectionDetails = closed,
+            updatedTraffics = emptyList()
+        )
     }
 
     override fun closeConnection(id: String) {

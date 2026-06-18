@@ -26,9 +26,11 @@ object Bridge {
     external fun nativeQueryGroupNames(excludeNotSelectable: Boolean): String
     external fun nativeQueryGroup(name: String, sort: String): String?
     external fun nativeHealthCheck(completable: CompletableDeferred<Unit>, name: String)
-    external fun nativeHealthCheckAll()
-    external fun nativeQueryConnections(): String?
-    external fun nativeCloseConnection(id: String)
+	external fun nativeHealthCheckAll()
+	external fun nativeQueryConnections(): String?
+	external fun nativeSetConnectionHistoryEnabled(enabled: Boolean)
+	external fun nativeIsConnectionHistoryEnabled(): Boolean
+	external fun nativeCloseConnection(id: String)
     external fun nativePatchSelector(selector: String, name: String): Boolean
     external fun nativeFetchAndValid(
         completable: FetchCallback,

@@ -144,13 +144,21 @@ object Clash {
         Bridge.nativeHealthCheckAll()
     }
 
-    fun queryConnections(): String? {
-        return Bridge.nativeQueryConnections()
-    }
+	fun queryConnections(): String? {
+		return Bridge.nativeQueryConnections()
+	}
 
-    fun closeConnection(id: String) {
-        Bridge.nativeCloseConnection(id)
-    }
+	fun setConnectionHistoryEnabled(enabled: Boolean) {
+		Bridge.nativeSetConnectionHistoryEnabled(enabled)
+	}
+
+	fun isConnectionHistoryEnabled(): Boolean {
+		return Bridge.nativeIsConnectionHistoryEnabled()
+	}
+
+	fun closeConnection(id: String) {
+		Bridge.nativeCloseConnection(id)
+	}
 
     fun patchSelector(selector: String, name: String): Boolean {
         return Bridge.nativePatchSelector(selector, name)

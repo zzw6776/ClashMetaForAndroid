@@ -13,8 +13,11 @@ interface IClashManager {
     fun queryConfiguration(): UiConfiguration
     fun queryProviders(): ProviderList
 
-    fun setConnectionObserver(observer: IConnectionObserver?, intervalMillis: Long)
-    fun closeConnection(id: String)
+	fun setConnectionObserver(observer: IConnectionObserver?, intervalMillis: Long)
+	fun setConnectionHistoryEnabled(enabled: Boolean)
+	fun isConnectionHistoryEnabled(): Boolean
+	fun queryConnectionHistory(): ConnectionDiff
+	fun closeConnection(id: String)
 
     fun patchSelector(group: String, name: String): Boolean
 

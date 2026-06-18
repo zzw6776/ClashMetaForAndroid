@@ -776,6 +776,88 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             popup.show()
         }
 
+        fun applyConnectionDiff(diff: ConnectionDiff) {
+            try {
+                val batchMillis = System.currentTimeMillis()
+                processTrafficTotals = diff.processTraffic
+                val reconcileSnapshot = awaitingSnapshotReconcile && diff.timestamp > 0L
+                if (diff.timestamp > 0L) {
+                    awaitingSnapshotReconcile = false
+                }
+                val newConnectionIds = diff.newConnections.mapTo(mutableSetOf()) { it.id }
+
+                for (conn in diff.newConnections) {
+                    closedConnectionIds.remove(conn.id)
+                    closedConnectionOrder.remove(conn.id)
+                    if (!connectionRecords.containsKey(conn.id)) {
+                        connectionSpeeds[conn.id] = 0L
+                        connectionUploadSpeeds[conn.id] = 0L
+                    }
+                    connectionRecords[conn.id] = ConnectionRecord(
+                        connection = conn,
+                        startMillis = parseConnectionStartMillis(conn.start)
+                    )
+                }
+
+                for (failed in diff.newFailedConnections) {
+                    if (failed.id.isBlank()) continue
+                    if (!failedConnectionRecords.containsKey(failed.id)) {
+                        failedConnectionOrder.addLast(failed.id)
+                    }
+                    failedConnectionRecords[failed.id] = FailedConnectionRecord(
+                        failedConnection = failed,
+                        failedAtMillis = parseConnectionStartMillis(failed.failedAt)
+                    )
+                }
+
+                val removedDetailIds = diff.removedConnectionDetails.mapTo(mutableSetOf()) { it.id }
+                for (conn in diff.removedConnectionDetails) {
+                    markConnectionClosed(conn.id, conn, batchMillis)
+                }
+
+                for (id in diff.removedConnections) {
+                    if (id !in removedDetailIds) {
+                        markConnectionClosed(id, closedAtMillis = batchMillis)
+                    }
+                }
+
+                if (reconcileSnapshot) {
+                    val activeIds = newConnectionIds
+                    connectionRecords
+                        .filter { (id, record) -> !record.closed && id !in activeIds }
+                        .keys
+                        .toList()
+                        .forEach { id -> markConnectionClosed(id, closedAtMillis = batchMillis) }
+                }
+                pruneClosedConnections()
+
+                val updatedTrafficIds = mutableSetOf<String>()
+                for (traffic in diff.updatedTraffics) {
+                    if (traffic.id in newConnectionIds) continue
+
+                    val record = connectionRecords[traffic.id]
+                    val prevConn = record?.connection
+                    if (record != null && prevConn != null && !record.closed) {
+                        updatedTrafficIds.add(traffic.id)
+                        connectionSpeeds[traffic.id] = boundedTrafficDelta(traffic.download - prevConn.download)
+                        connectionUploadSpeeds[traffic.id] = boundedTrafficDelta(traffic.upload - prevConn.upload)
+                        record.connection = prevConn.copy(download = traffic.download, upload = traffic.upload)
+                    }
+                }
+
+                for ((id, record) in connectionRecords) {
+                    if (!record.closed && id !in newConnectionIds && id !in updatedTrafficIds) {
+                        connectionSpeeds[id] = 0L
+                        connectionUploadSpeeds[id] = 0L
+                    }
+                }
+
+                refreshConnectionList(false)
+            } catch (e: Exception) {
+                Log.w("Failed to update connections UI", e)
+            }
+        }
+
         val observer = object : IConnectionObserver {
             override fun onConnectionDiff(diff: ConnectionDiff) {
                 diffChannel.trySend(diff)
@@ -800,13 +882,62 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             awaitingSnapshotReconcile = false
         }
 
+        suspend fun unregisterObserver() {
+            stopObserver()
+        }
+
+        suspend fun setConnectionHistoryEnabled(enabled: Boolean): Boolean {
+            return withContext(Dispatchers.IO) {
+                withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
+                    com.github.kr328.clash.util.withClash {
+                        this.setConnectionHistoryEnabled(enabled)
+                    }
+                    true
+                } ?: false
+            }
+        }
+
+        suspend fun loadConnectionHistory() {
+            val history = withContext(Dispatchers.IO) {
+                withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
+                    com.github.kr328.clash.util.withClash {
+                        this.queryConnectionHistory()
+                    }
+                }
+            }
+            if (history != null) {
+                clearConnectionList(resetProcessFilter = false)
+                awaitingSnapshotReconcile = false
+                applyConnectionDiff(history)
+            } else {
+                Log.w("Failed to load connection history")
+            }
+        }
+
+        suspend fun resetConnectionHistory() {
+            unregisterObserver()
+            setConnectionHistoryEnabled(false)
+            if (design.trackingEnabled) {
+                setConnectionHistoryEnabled(true)
+            }
+        }
+
         suspend fun registerObserver(force: Boolean = false) {
             if (!design.trackingEnabled) {
                 stopObserver()
                 return
             }
 
-            if (!force && observerRegistered) return
+            if (!setConnectionHistoryEnabled(true)) {
+                Log.w("Failed to enable connection history")
+                return
+            }
+
+            if (!force && observerRegistered) {
+                return
+            }
+
+            loadConnectionHistory()
 
             val registered = withContext(Dispatchers.IO) {
                 withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
@@ -822,10 +953,6 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             if (!registered) {
                 Log.w("Failed to register connection observer")
             }
-        }
-
-        suspend fun unregisterObserver() {
-            stopObserver()
         }
 
         registerObserver(force = true)
@@ -846,7 +973,10 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             ConnectionsDesign.Request.Close -> finish()
                             ConnectionsDesign.Request.ClearConnections -> {
                                 clearConnectionList(resetProcessFilter = false)
-                                registerObserver(force = true)
+                                if (design.trackingEnabled) {
+                                    resetConnectionHistory()
+                                    registerObserver(force = true)
+                                }
                             }
                             ConnectionsDesign.Request.FilterChanged -> refreshConnectionList(true)
                             ConnectionsDesign.Request.ProcessFilterClicked -> showProcessFilterMenu()
@@ -857,6 +987,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                     registerObserver(force = true)
                                 } else {
                                     unregisterObserver()
+                                    setConnectionHistoryEnabled(false)
                                     clearConnectionList(resetProcessFilter = false)
                                 }
                             }
@@ -903,89 +1034,10 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             }
                         }
                     }
-                    diffChannel.onReceive { diff ->
-                        if (!design.trackingEnabled) return@onReceive
-
-                        try {
-                            val batchMillis = System.currentTimeMillis()
-                            processTrafficTotals = diff.processTraffic
-                            val reconcileSnapshot = awaitingSnapshotReconcile && diff.timestamp > 0L
-                            if (diff.timestamp > 0L) {
-                                awaitingSnapshotReconcile = false
-                            }
-                            val newConnectionIds = diff.newConnections.mapTo(mutableSetOf()) { it.id }
-
-                            for (conn in diff.newConnections) {
-                                closedConnectionIds.remove(conn.id)
-                                closedConnectionOrder.remove(conn.id)
-                                if (!connectionRecords.containsKey(conn.id)) {
-                                    connectionSpeeds[conn.id] = 0L
-                                    connectionUploadSpeeds[conn.id] = 0L
-                                }
-                                connectionRecords[conn.id] = ConnectionRecord(
-                                    connection = conn,
-                                    startMillis = parseConnectionStartMillis(conn.start)
-                                )
-                            }
-
-                            for (failed in diff.newFailedConnections) {
-                                if (failed.id.isBlank()) continue
-                                if (!failedConnectionRecords.containsKey(failed.id)) {
-                                    failedConnectionOrder.addLast(failed.id)
-                                }
-                                failedConnectionRecords[failed.id] = FailedConnectionRecord(
-                                    failedConnection = failed,
-                                    failedAtMillis = parseConnectionStartMillis(failed.failedAt)
-                                )
-                            }
-
-                            val removedDetailIds = diff.removedConnectionDetails.mapTo(mutableSetOf()) { it.id }
-                            for (conn in diff.removedConnectionDetails) {
-                                markConnectionClosed(conn.id, conn, batchMillis)
-                            }
-
-                            for (id in diff.removedConnections) {
-                                if (id !in removedDetailIds) {
-                                    markConnectionClosed(id, closedAtMillis = batchMillis)
-                                }
-                            }
-
-                            if (reconcileSnapshot) {
-                                val activeIds = newConnectionIds
-                                connectionRecords
-                                    .filter { (id, record) -> !record.closed && id !in activeIds }
-                                    .keys
-                                    .toList()
-                                    .forEach { id -> markConnectionClosed(id, closedAtMillis = batchMillis) }
-                            }
-                            pruneClosedConnections()
-
-                            val updatedTrafficIds = mutableSetOf<String>()
-                            for (traffic in diff.updatedTraffics) {
-                                if (traffic.id in newConnectionIds) continue
-
-                                val record = connectionRecords[traffic.id]
-                                val prevConn = record?.connection
-                                if (record != null && prevConn != null && !record.closed) {
-                                    updatedTrafficIds.add(traffic.id)
-                                    connectionSpeeds[traffic.id] = boundedTrafficDelta(traffic.download - prevConn.download)
-                                    connectionUploadSpeeds[traffic.id] = boundedTrafficDelta(traffic.upload - prevConn.upload)
-                                    record.connection = prevConn.copy(download = traffic.download, upload = traffic.upload)
-                                }
-                            }
-
-                            for ((id, record) in connectionRecords) {
-                                if (!record.closed && id !in newConnectionIds && id !in updatedTrafficIds) {
-                                    connectionSpeeds[id] = 0L
-                                    connectionUploadSpeeds[id] = 0L
-                                }
-                            }
-
-                            refreshConnectionList(false)
-                        } catch (e: Exception) {
-                            Log.w("Failed to update connections UI", e)
+                        diffChannel.onReceive { diff ->
+                            if (!design.trackingEnabled) return@onReceive
+                            applyConnectionDiff(diff)
                         }
-                    }
                 }
             }
         } finally {
@@ -1018,7 +1070,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
     companion object {
         private const val UNKNOWN_PACKAGE = "Unknown"
-        private const val MAX_CLOSED_CONNECTIONS = 1000
+        private const val MAX_CLOSED_CONNECTIONS = 5000
         private const val MAX_FAILED_CONNECTIONS = 1000
         private const val MAX_REASONABLE_SPEED_BYTES_PER_SECOND = 10L * 1024L * 1024L * 1024L
         private const val REMOTE_CALL_TIMEOUT_MILLIS = 3_000L
