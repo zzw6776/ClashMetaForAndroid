@@ -17,8 +17,10 @@ import com.github.kr328.clash.core.util.trafficUpload
 import com.github.kr328.clash.service.R
 import com.github.kr328.clash.service.StatusProvider
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import java.util.concurrent.TimeUnit
@@ -81,6 +83,7 @@ class DynamicNotificationModule(service: Service) : Module<Unit>(service) {
 
     override suspend fun run() = coroutineScope {
         var interactive = service.getSystemService<PowerManager>()?.isInteractive ?: true
+        var tickerJob: Job? = null
 
         val screenToggle = receiveBroadcast(false, Channel.CONFLATED) {
             addAction(Intent.ACTION_SCREEN_ON)
@@ -91,14 +94,25 @@ class DynamicNotificationModule(service: Service) : Module<Unit>(service) {
             addAction(Intents.ACTION_PROFILE_LOADED)
         }
 
-        launch {
-            val pm = service.getSystemService<PowerManager>()
-            while (true) {
-                if (pm?.isInteractive != false)
+        fun startTicker() {
+            if (tickerJob?.isActive == true) return
+
+            tickerJob = launch {
+                while (isActive) {
                     update()
 
-                delay(TimeUnit.SECONDS.toMillis(1))
+                    delay(TimeUnit.SECONDS.toMillis(1))
+                }
             }
+        }
+
+        fun stopTicker() {
+            tickerJob?.cancel()
+            tickerJob = null
+        }
+
+        if (interactive) {
+            startTicker()
         }
 
         while (true) {
@@ -106,8 +120,12 @@ class DynamicNotificationModule(service: Service) : Module<Unit>(service) {
                 screenToggle.onReceive {
                     interactive = it.action == Intent.ACTION_SCREEN_ON
 
-                    if (interactive)
+                    if (interactive) {
                         update(force = true)
+                        startTicker()
+                    } else {
+                        stopTicker()
+                    }
                 }
                 profileLoaded.onReceive {
                     builder.setContentTitle(StatusProvider.currentProfile ?: "Not selected")
