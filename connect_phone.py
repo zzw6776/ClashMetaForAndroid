@@ -16,6 +16,47 @@ def print_green(text):
 def print_red(text):
     print(f"\033[31m{text}\033[0m" if os.name != 'nt' else text)
 
+def run_adb(args, timeout=10):
+    try:
+        res = subprocess.run(
+            ["adb", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+        return (res.stdout or "") + (res.stderr or "")
+    except subprocess.TimeoutExpired:
+        return "adb command timed out"
+    except Exception as e:
+        return f"Error calling adb: {e}"
+
+def try_adb_connect(ip, port, config_file):
+    target = f"{ip}:{port}"
+    output = run_adb(["connect", target], timeout=8)
+    if "connected to" in output or "already connected to" in output:
+        print_green(f"Success! Connected to port: {port}")
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump({"IP": ip, "Port": str(port)}, f, indent=4)
+        subprocess.run(["adb", "devices"])
+        return True
+    return False
+
+def discover_mdns_ports(ip):
+    output = run_adb(["mdns", "services"], timeout=5)
+    ports = []
+    for line in output.splitlines():
+        if "_adb-tls-connect._tcp" not in line:
+            continue
+        marker = f"{ip}:"
+        if marker not in line:
+            continue
+        port_text = line.rsplit(marker, 1)[-1].strip().split()[0]
+        if port_text.isdigit():
+            ports.append(int(port_text))
+    return sorted(set(ports))
+
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_file = os.path.join(script_dir, ".adb_config")
@@ -41,28 +82,25 @@ def main():
     # 3. Try to reuse last successful port
     if last_port:
         print(f"Trying last successful port: {last_port} ...")
-        target = f"{ip}:{last_port}"
-        try:
-            res = subprocess.run(["adb", "connect", target], capture_output=True, text=True)
-            output = res.stdout + res.stderr
-            if "connected to" in output or "already connected to" in output:
-                print_green("Success (reused last port)!")
-                # Save config
-                with open(config_file, 'w', encoding='utf-8') as f:
-                    json.dump({"IP": ip, "Port": str(last_port)}, f, indent=4)
-                subprocess.run(["adb", "devices"])
-                return
-        except Exception as e:
-            print(f"Error calling adb: {e}")
+        if try_adb_connect(ip, last_port, config_file):
+            print_green("Success (reused last port)!")
+            return
             
-    # 4. If direct connection fails, scan ports (35000-50000)
+    # 4. Prefer mDNS discovery; it is much faster than scanning.
+    print("Direct connection failed. Discovering ADB ports via mDNS...")
+    for port in discover_mdns_ports(ip):
+        print(f"Trying mDNS port: {port} ...")
+        if try_adb_connect(ip, port, config_file):
+            return
+
+    # 5. If mDNS fails, scan ports (35000-50000)
     print("Direct connection failed. Scanning ADB ports (35000-50000)...")
     
     open_ports = []
     
     def check_port(port):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(0.4) # 400ms timeout
+        s.settimeout(0.15)
         try:
             s.connect((ip, port))
             open_ports.append(port)
@@ -73,26 +111,16 @@ def main():
             
     ports = list(range(35000, 50001))
     
-    # 100 max workers to prevent syn flood drops
-    with ThreadPoolExecutor(max_workers=100) as executor:
+    with ThreadPoolExecutor(max_workers=300) as executor:
         executor.map(check_port, ports)
         
-    # 5. Try to connect to scanned open ports
+    # 6. Try to connect to scanned open ports
     connected = False
     for port in sorted(open_ports):
         print(f"Trying port: {port} ...")
-        target = f"{ip}:{port}"
-        try:
-            res = subprocess.run(["adb", "connect", target], capture_output=True, text=True)
-            output = res.stdout + res.stderr
-            if "connected to" in output or "already connected to" in output:
-                print_green(f"Success! Connected to port: {port}")
-                with open(config_file, 'w', encoding='utf-8') as f:
-                    json.dump({"IP": ip, "Port": str(port)}, f, indent=4)
-                connected = True
-                break
-        except Exception:
-            pass
+        if try_adb_connect(ip, port, config_file):
+            connected = True
+            break
             
     if not connected:
         print_red(f"Failed to connect. Please make sure wireless debugging is enabled and IP {ip} is correct.")

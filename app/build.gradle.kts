@@ -33,6 +33,7 @@ tasks.getByName("clean", type = Delete::class) {
 }
 
 val geoFilesDownloadDir = "src/main/assets"
+val geoFilesCacheTtlMillis = 24L * 60L * 60L * 1000L
 
 task("downloadGeoFiles") {
 
@@ -45,13 +46,50 @@ task("downloadGeoFiles") {
     )
 
     doLast {
+        val now = System.currentTimeMillis()
+        val outputFiles = geoFilesUrls.values.map { outputFileName ->
+            file("$geoFilesDownloadDir/$outputFileName")
+        }
+        val cacheValid = outputFiles.all { outputFile ->
+            outputFile.exists() && now - outputFile.lastModified() < geoFilesCacheTtlMillis
+        }
+
+        if (cacheValid) {
+            println("Geo files cache is fresh; skip download.")
+            return@doLast
+        }
+
         geoFilesUrls.forEach { (downloadUrl, outputFileName) ->
             val url = URL(downloadUrl)
             val outputPath = file("$geoFilesDownloadDir/$outputFileName")
+            val tempPath = outputPath.toPath().resolveSibling("$outputFileName.tmp")
             outputPath.parentFile.mkdirs()
-            url.openStream().use { input ->
-                Files.copy(input, outputPath.toPath(), StandardCopyOption.REPLACE_EXISTING)
+
+            try {
+                Files.deleteIfExists(tempPath)
+                url.openStream().use { input ->
+                    Files.copy(input, tempPath, StandardCopyOption.REPLACE_EXISTING)
+                }
+
+                if (!Files.exists(tempPath) || Files.size(tempPath) <= 0L) {
+                    throw GradleException("Downloaded geo file is empty: $outputFileName")
+                }
+
+                try {
+                    Files.move(
+                        tempPath,
+                        outputPath.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE
+                    )
+                } catch (e: java.nio.file.AtomicMoveNotSupportedException) {
+                    Files.move(tempPath, outputPath.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
+
                 println("$outputFileName downloaded to $outputPath")
+            } catch (e: Exception) {
+                Files.deleteIfExists(tempPath)
+                throw e
             }
         }
     }

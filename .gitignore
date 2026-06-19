@@ -66,6 +66,7 @@ google-services.json
 .DS_Store
 
 # Debug & temp files
+.adb_config
 diff.txt
 log.txt
 log_cmd.txt

@@ -8,6 +8,7 @@ import com.github.kr328.clash.core.model.ProcessTraffic
 import com.github.kr328.clash.design.ConnectionsDesign
 import com.github.kr328.clash.design.adapter.ConnectionStatus
 import com.github.kr328.clash.design.databinding.DesignConnectionDetailsBinding
+import com.github.kr328.clash.design.databinding.DesignConnectionDetailsPageBinding
 import com.github.kr328.clash.design.util.formatBytes
 import com.github.kr328.clash.design.util.formatTraffic
 import com.github.kr328.clash.service.remote.IConnectionObserver
@@ -36,6 +37,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         val connectionRecords = mutableMapOf<String, ConnectionRecord>()
         val failedConnectionRecords = mutableMapOf<String, FailedConnectionRecord>()
         val mergedConnectionRecords = mutableMapOf<String, ConnectionRecord>()
+        val mergedConnectionMemberIds = mutableMapOf<String, List<String>>()
         val connectionSpeeds = mutableMapOf<String, Long>()
         val connectionUploadSpeeds = mutableMapOf<String, Long>()
         val packageNames = mutableMapOf<String, String>()
@@ -52,6 +54,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         var selectedProxyKey: String? = uiStore.connectionProxyFilter.takeIf { it.isNotBlank() }
         var detailsBinding: DesignConnectionDetailsBinding? = null
         var detailsConnectionId: String? = null
+        var detailsRefresh: (() -> Unit)? = null
         val clockTimeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         lateinit var refreshConnectionList: (scrollToTop: Boolean) -> Unit
 
@@ -133,6 +136,13 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 formatClockTime(nowMillis)
             }
             return "$start - $end"
+        }
+
+        fun formatFailedConnectionTimeRange(record: FailedConnectionRecord?): String {
+            val failedAt = record?.failedAtMillis?.let { formatClockTime(it) }
+                ?: record?.failedConnection?.failedAt?.ifBlank { null }
+                ?: "N/A"
+            return "$failedAt - N/A"
         }
 
         fun boundedTrafficDelta(delta: Long): Long {
@@ -222,7 +232,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             connectionUploadSpeeds[id] = 0L
         }
 
-        fun updateConnectionDetails(binding: DesignConnectionDetailsBinding, id: String) {
+        fun updateConnectionDetails(binding: DesignConnectionDetailsPageBinding, id: String) {
             val record = mergedConnectionRecords[id] ?: connectionRecords[id]
             val failedRecord = failedConnectionRecords[id]
             if (record == null && failedRecord == null) return
@@ -279,14 +289,28 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             binding.tvSnapshotTime.text = if (record != null) {
                 formatConnectionTimeRange(record, nowMillis)
             } else {
-                failedRecord?.failedConnection?.failedAt?.ifBlank { "N/A" } ?: "N/A"
+                formatFailedConnectionTimeRange(failedRecord)
             }
             binding.tvMetadataType.text = meta.type.ifBlank { "N/A" }
             binding.tvSpecialProxy.text = failedRecord?.failedConnection?.proxy?.takeIf { it.isNotBlank() }
                 ?: meta.specialProxy.ifBlank { "N/A" }
             binding.tvSpecialRules.text = failedRecord?.failedConnection?.error?.takeIf { it.isNotBlank() }
                 ?: meta.specialRules.ifBlank { "N/A" }
-            binding.btnCloseConnection.isEnabled = !isClosed && !isFailed
+        }
+
+        fun detailStatusFor(id: String): ConnectionStatus {
+            failedConnectionRecords[id]?.let { return ConnectionStatus.FAILED }
+            val record = mergedConnectionRecords[id] ?: connectionRecords[id]
+            return if (record?.closed == true) {
+                ConnectionStatus.CLOSED
+            } else {
+                ConnectionStatus.ACTIVE
+            }
+        }
+
+        fun updateDetailAction(binding: DesignConnectionDetailsBinding, id: String) {
+            binding.toolbar.menu.findItem(MENU_CLOSE_CONNECTION)?.isVisible =
+                detailStatusFor(id) == ConnectionStatus.ACTIVE
         }
 
         val diffChannel = Channel<ConnectionDiff>(Channel.UNLIMITED)
@@ -307,9 +331,15 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 binding.self = dialog
                 dialog.setContentView(binding.root)
 
-                detailsBinding = binding
-                detailsConnectionId = conn.id
-                updateConnectionDetails(binding, conn.id)
+                binding.toolbar.menu.add(0, MENU_CLOSE_CONNECTION, 0, "Close Connection").apply {
+                    setIcon(com.github.kr328.clash.design.R.drawable.ic_baseline_stop)
+                    setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+                }
+
+                val detailIds = mergedConnectionMemberIds[conn.id]?.takeIf { it.size > 1 } ?: listOf(conn.id)
+                var selectedDetailIndex = 0
+                fun selectedDetailId(): String = detailIds[selectedDetailIndex]
+                fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
 
                 val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 val setupCopy = { view: android.widget.TextView, label: String ->
@@ -323,27 +353,166 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                         true
                     }
                 }
-                setupCopy(binding.tvDest, "Destination")
-                setupCopy(binding.tvPort, "Port")
-                setupCopy(binding.tvProcess, "Process")
-                setupCopy(binding.tvNetwork, "Network")
-                setupCopy(binding.tvRule, "Rule")
-                setupCopy(binding.tvChain, "Chain")
-                setupCopy(binding.tvIp, "IP")
-                setupCopy(binding.tvCountry, "Country")
-                setupCopy(binding.tvDns, "DNS")
-                setupCopy(binding.tvDnsMode, "DNS Mode")
-                setupCopy(binding.tvMetadataType, "Type")
-                setupCopy(binding.tvSpecialProxy, "Special Proxy")
-                setupCopy(binding.tvSpecialRules, "Special Rules")
+                fun setupPageCopy(pageBinding: DesignConnectionDetailsPageBinding) {
+                    setupCopy(pageBinding.tvDest, "Destination")
+                    setupCopy(pageBinding.tvPort, "Port")
+                    setupCopy(pageBinding.tvProcess, "Process")
+                    setupCopy(pageBinding.tvNetwork, "Network")
+                    setupCopy(pageBinding.tvRule, "Rule")
+                    setupCopy(pageBinding.tvChain, "Chain")
+                    setupCopy(pageBinding.tvIp, "IP")
+                    setupCopy(pageBinding.tvCountry, "Country")
+                    setupCopy(pageBinding.tvDns, "DNS")
+                    setupCopy(pageBinding.tvDnsMode, "DNS Mode")
+                    setupCopy(pageBinding.tvMetadataType, "Type")
+                    setupCopy(pageBinding.tvSpecialProxy, "Special Proxy")
+                    setupCopy(pageBinding.tvSpecialRules, "Special Rules")
+                }
+
+                val visibleDetailPages = mutableMapOf<Int, DesignConnectionDetailsPageBinding>()
+                class DetailPageHolder(val pageBinding: DesignConnectionDetailsPageBinding) :
+                    androidx.recyclerview.widget.RecyclerView.ViewHolder(pageBinding.root)
+
+                val detailPagerAdapter = object : androidx.recyclerview.widget.RecyclerView.Adapter<DetailPageHolder>() {
+                    override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): DetailPageHolder {
+                        val pageBinding = DesignConnectionDetailsPageBinding.inflate(layoutInflater, parent, false)
+                        setupPageCopy(pageBinding)
+                        return DetailPageHolder(pageBinding)
+                    }
+
+                    override fun onBindViewHolder(holder: DetailPageHolder, position: Int) {
+                        visibleDetailPages[position] = holder.pageBinding
+                        updateConnectionDetails(holder.pageBinding, detailIds[position])
+                    }
+
+                    override fun onViewRecycled(holder: DetailPageHolder) {
+                        visibleDetailPages.entries.removeAll { it.value === holder.pageBinding }
+                    }
+
+                    override fun getItemCount(): Int = detailIds.size
+
+                    fun refreshVisible() {
+                        visibleDetailPages.forEach { (index, pageBinding) ->
+                            detailIds.getOrNull(index)?.let { id ->
+                                updateConnectionDetails(pageBinding, id)
+                            }
+                        }
+                        updateDetailAction(binding, selectedDetailId())
+                    }
+                }
+
+                fun makeTabBackground(selected: Boolean): android.graphics.drawable.Drawable {
+                    return android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = 18.dp().toFloat()
+                        setColor(if (selected) 0xFFE3F2FD.toInt() else 0xFFF1F3F4.toInt())
+                        if (selected) {
+                            setStroke(1.dp(), android.graphics.Color.parseColor("#1E88E5"))
+                        }
+                    }
+                }
+                fun tabTextColor(id: String, selected: Boolean): Int {
+                    return when (detailStatusFor(id)) {
+                        ConnectionStatus.FAILED -> android.graphics.Color.parseColor("#B3261E")
+                        ConnectionStatus.CLOSED -> android.graphics.Color.parseColor("#6F6F6F")
+                        ConnectionStatus.ACTIVE -> if (selected) {
+                            android.graphics.Color.parseColor("#0D47A1")
+                        } else {
+                            android.graphics.Color.parseColor("#333333")
+                        }
+                    }
+                }
+                lateinit var showDetailAt: (Int) -> Unit
+                fun renderDetailTabs() {
+                    binding.detailTabScroll.visibility = if (detailIds.size > 1) {
+                        android.view.View.VISIBLE
+                    } else {
+                        android.view.View.GONE
+                    }
+                    binding.detailTabContainer.removeAllViews()
+                    if (detailIds.size <= 1) return
+
+                    detailIds.forEachIndexed { index, id ->
+                        val selected = index == selectedDetailIndex
+                        val tab = android.widget.TextView(this@ConnectionsActivity).apply {
+                            text = (index + 1).toString()
+                            gravity = android.view.Gravity.CENTER
+                            minWidth = 44.dp()
+                            height = 34.dp()
+                            textSize = 14f
+                            typeface = android.graphics.Typeface.DEFAULT_BOLD
+                            setTextColor(tabTextColor(id, selected))
+                            background = makeTabBackground(selected)
+                            setOnClickListener {
+                                showDetailAt(index)
+                                binding.detailTabScroll.post {
+                                    binding.detailTabScroll.smoothScrollTo((left - 24.dp()).coerceAtLeast(0), 0)
+                                }
+                            }
+                        }
+                        tab.layoutParams = android.widget.LinearLayout.LayoutParams(
+                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            marginEnd = 8.dp()
+                        }
+                        binding.detailTabContainer.addView(tab)
+                    }
+                }
+                fun selectDetailAt(index: Int) {
+                    val nextIndex = index.coerceIn(0, detailIds.lastIndex)
+                    if (nextIndex == selectedDetailIndex && detailsConnectionId == selectedDetailId()) return
+                    selectedDetailIndex = nextIndex
+                    detailsConnectionId = selectedDetailId()
+                    visibleDetailPages[nextIndex]?.let { updateConnectionDetails(it, selectedDetailId()) }
+                    updateDetailAction(binding, selectedDetailId())
+                    renderDetailTabs()
+                }
+                showDetailAt = { index ->
+                    val nextIndex = index.coerceIn(0, detailIds.lastIndex)
+                    if (binding.detailsPager.currentItem != nextIndex) {
+                        binding.detailsPager.setCurrentItem(nextIndex, true)
+                    }
+                    selectDetailAt(nextIndex)
+                }
+
+                binding.detailsPager.apply {
+                    adapter = detailPagerAdapter
+                    isUserInputEnabled = detailIds.size > 1
+                    offscreenPageLimit = 1
+                    registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
+                        override fun onPageSelected(position: Int) {
+                            selectDetailAt(position)
+                        }
+                    })
+                }
+
+                detailsBinding = binding
+                detailsConnectionId = selectedDetailId()
+                detailsRefresh = { detailPagerAdapter.refreshVisible() }
+                updateDetailAction(binding, selectedDetailId())
+                renderDetailTabs()
+
+                val detailTicker = this@ConnectionsActivity.launch {
+                    while (isActive && detailsBinding === binding) {
+                        kotlinx.coroutines.delay(1000L)
+                        detailPagerAdapter.refreshVisible()
+                    }
+                }
 
                 binding.toolbar.setNavigationOnClickListener { dialog.dismiss() }
-                binding.btnCloseConnection.setOnClickListener {
+                binding.toolbar.setOnMenuItemClickListener { item ->
+                    if (item.itemId != MENU_CLOSE_CONNECTION) return@setOnMenuItemClickListener false
+
+                    val closeId = selectedDetailId()
+                    if (detailStatusFor(closeId) != ConnectionStatus.ACTIVE) {
+                        updateDetailAction(binding, closeId)
+                        return@setOnMenuItemClickListener true
+                    }
                     this@ConnectionsActivity.launch(Dispatchers.IO) {
                         withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
                             com.github.kr328.clash.util.withClash {
-                                if (conn.id.startsWith("merged|")) {
-                                    val parts = conn.id.split("|")
+                                if (closeId.startsWith("merged|")) {
+                                    val parts = closeId.split("|")
                                     if (parts.size >= 4) {
                                         val basePkg = parts[1]
                                         val hostK = parts[2]
@@ -358,17 +527,21 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                         }
                                     }
                                 } else {
-                                    closeConnection(conn.id)
+                                    closeConnection(closeId)
                                 }
                             }
                         }
                     }
                     dialog.dismiss()
+                    true
                 }
                 dialog.setOnDismissListener {
+                    detailTicker.cancel()
+                    binding.detailsPager.adapter = null
                     if (detailsBinding === binding) {
                         detailsBinding = null
                         detailsConnectionId = null
+                        detailsRefresh = null
                     }
                 }
 
@@ -380,6 +553,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         refreshConnectionList = { scrollToTop ->
             try {
                 mergedConnectionRecords.clear()
+                mergedConnectionMemberIds.clear()
 
                 val filterActive = design.filterActive
                 val filterClosed = design.filterClosed
@@ -524,6 +698,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                     closedMillis = latestClosedMillis
                                 )
                                 mergedConnectionRecords[mergedId] = virtualRecord
+                                mergedConnectionMemberIds[mergedId] = recordList.map { it.connection.id }
                                 DisplayRecord(
                                     connection = mergedConnection,
                                     status = firstRecord.status,
@@ -632,11 +807,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     }
                 }
                 design.updateExpandCollapseIconState(collapsedGroups.isNotEmpty())
-                detailsBinding?.let { binding ->
-                    detailsConnectionId?.let { id ->
-                        updateConnectionDetails(binding, id)
-                    }
-                }
+                detailsRefresh?.invoke()
             } catch (e: Exception) {
                 Log.w("Failed to update connections UI", e)
             }
@@ -1074,6 +1245,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         private const val MAX_FAILED_CONNECTIONS = 1000
         private const val MAX_REASONABLE_SPEED_BYTES_PER_SECOND = 10L * 1024L * 1024L * 1024L
         private const val REMOTE_CALL_TIMEOUT_MILLIS = 3_000L
+        private const val MENU_CLOSE_CONNECTION = 1
 
         private val CONNECTION_START_FRACTION_REGEX = Regex("""\.(\d{1,9})(?=Z|[+-]\d{2}:?\d{2}$|$)""")
         private val CONNECTION_START_TIMEZONE_COLON_REGEX = Regex("""([+-]\d{2}):(\d{2})$""")

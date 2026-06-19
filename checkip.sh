@@ -11,15 +11,7 @@ mkdir -p "$RULEDIR" "$NORMDIR"
 # 你要检查的域名/IP，写这里
 # =========================
 TARGETS=(
-  "googleapis.cn"
-  "gstatic.cn"
-  "gradle.org"
-  "plugins.gradle.org"
-  "repo.maven.apache.org"
-  "github.com"
-  "openai.com"
-  "8.8.8.8"
-  "192.168.1.1"
+"clash-static.inbox.supercell.com"
 )
 
 # =========================
