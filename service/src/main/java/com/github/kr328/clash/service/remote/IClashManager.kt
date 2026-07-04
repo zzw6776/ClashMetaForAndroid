@@ -17,6 +17,15 @@ interface IClashManager {
 	fun setConnectionHistoryEnabled(enabled: Boolean)
 	fun isConnectionHistoryEnabled(): Boolean
 	fun queryConnectionHistory(): ConnectionDiff
+	fun queryConnectionHistoryOverview(): ConnectionHistoryOverview
+	fun queryConnectionHistoryPage(
+		offset: Int,
+		limit: Int,
+		process: String,
+		proxy: String,
+		includeClosed: Boolean,
+		includeFailed: Boolean
+	): ConnectionHistoryPage
 	fun closeConnection(id: String)
 
     fun patchSelector(group: String, name: String): Boolean

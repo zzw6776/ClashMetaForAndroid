@@ -24,30 +24,26 @@ fun CoroutineScope.clashRuntime(block: suspend ClashRuntimeScope.() -> Unit): Cl
             launch(Dispatchers.IO) {
                 globalLock.withLock {
                     Log.d("ClashRuntime: initialize")
+                    val moduleJobs = mutableListOf<Job>()
 
                     try {
-                        val modules = mutableListOf<Module<*>>()
-
                         Clash.reset()
                         Clash.clearOverride(Clash.OverrideSlot.Session)
 
                         val scope = object : ClashRuntimeScope {
                             override fun <E, T : Module<E>> install(module: T): T {
-                                launch {
-                                    modules.add(module)
-
+                                moduleJobs.add(launch {
                                     module.execute()
-                                }
+                                })
 
                                 return module
                             }
                         }
 
                         scope.block()
-
-                        cancel()
                     } finally {
                         withContext(NonCancellable) {
+                            moduleJobs.forEach { it.cancelAndJoin() }
                             Clash.reset()
                             Clash.clearOverride(Clash.OverrideSlot.Session)
 

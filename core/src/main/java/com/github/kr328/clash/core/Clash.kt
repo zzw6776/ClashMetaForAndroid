@@ -1,5 +1,6 @@
 package com.github.kr328.clash.core
 
+import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.bridge.*
 import com.github.kr328.clash.core.model.*
 import com.github.kr328.clash.core.util.parseInetSocketAddress
@@ -23,6 +24,7 @@ object Clash {
         ignoreUnknownKeys = true
         encodeDefaults = false
     }
+    private val ConnectionJson = Json { ignoreUnknownKeys = true }
 
     fun reset() {
         Bridge.nativeReset()
@@ -65,8 +67,7 @@ object Clash {
 
     fun parseConnectionSnapshot(json: String): com.github.kr328.clash.core.model.ConnectionSnapshot? {
         return try {
-            val parser = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-            parser.decodeFromString(com.github.kr328.clash.core.model.ConnectionSnapshot.serializer(), json)
+            ConnectionJson.decodeFromString(com.github.kr328.clash.core.model.ConnectionSnapshot.serializer(), json)
         } catch (e: Exception) {
             com.github.kr328.clash.common.log.Log.e("ConnectionParseError: ${e.message} for json: $json", e)
             null
@@ -148,8 +149,22 @@ object Clash {
 		return Bridge.nativeQueryConnections()
 	}
 
-	fun setConnectionHistoryEnabled(enabled: Boolean) {
-		Bridge.nativeSetConnectionHistoryEnabled(enabled)
+	fun peekConnectionHistoryEvents(limit: Int): ConnectionHistoryEvents? {
+		val json = Bridge.nativePeekConnectionHistoryEvents(limit) ?: return null
+		return try {
+			ConnectionJson.decodeFromString(ConnectionHistoryEvents.serializer(), json)
+		} catch (e: Exception) {
+			Log.e("ConnectionHistoryParseError: ${e.message}", e)
+			null
+		}
+	}
+
+	fun ackConnectionHistoryEvents(token: Long, sequence: Long) {
+		Bridge.nativeAckConnectionHistoryEvents(token, sequence)
+	}
+
+	fun setConnectionHistoryEnabled(enabled: Boolean, session: String = "") {
+		Bridge.nativeSetConnectionHistoryEnabled(enabled, session)
 	}
 
 	fun isConnectionHistoryEnabled(): Boolean {

@@ -65,4 +65,14 @@ class ServiceStore(context: Context) {
         key = "dynamic_notification",
         defaultValue = true
     )
+
+    var connectionHistoryEnabled by store.boolean(
+        key = "connection_history_enabled",
+        defaultValue = false
+    )
+
+    var connectionHistorySessionId by store.string(
+        key = "connection_history_session_id",
+        defaultValue = ""
+    )
 }

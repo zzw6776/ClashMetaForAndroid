@@ -28,7 +28,9 @@ object Bridge {
     external fun nativeHealthCheck(completable: CompletableDeferred<Unit>, name: String)
 	external fun nativeHealthCheckAll()
 	external fun nativeQueryConnections(): String?
-	external fun nativeSetConnectionHistoryEnabled(enabled: Boolean)
+	external fun nativePeekConnectionHistoryEvents(limit: Int): String?
+	external fun nativeAckConnectionHistoryEvents(token: Long, sequence: Long)
+	external fun nativeSetConnectionHistoryEnabled(enabled: Boolean, session: String)
 	external fun nativeIsConnectionHistoryEnabled(): Boolean
 	external fun nativeCloseConnection(id: String)
     external fun nativePatchSelector(selector: String, name: String): Boolean

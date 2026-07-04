@@ -11,7 +11,8 @@ mkdir -p "$RULEDIR" "$NORMDIR"
 # 你要检查的域名/IP，写这里
 # =========================
 TARGETS=(
-"clash-static.inbox.supercell.com"
+"dingtalk.com"
+"2591.push.ft07.com"
 )
 
 # =========================

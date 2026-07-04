@@ -116,9 +116,20 @@ func queryConnections() *C.char {
 	return marshalJson(snapshot)
 }
 
+//export peekConnectionHistoryEvents
+func peekConnectionHistoryEvents(limit C.int) *C.char {
+	events := tunnel.PeekConnectionHistoryEvents(int(limit))
+	return marshalJson(events)
+}
+
+//export ackConnectionHistoryEvents
+func ackConnectionHistoryEvents(token C.longlong, sequence C.longlong) {
+	tunnel.AckConnectionHistoryEvents(uint64(token), uint64(sequence))
+}
+
 //export setConnectionHistoryEnabled
-func setConnectionHistoryEnabled(enabled C.int) {
-	tunnel.SetConnectionHistoryEnabled(enabled != 0)
+func setConnectionHistoryEnabled(enabled C.int, session C.c_string) {
+	tunnel.SetConnectionHistoryEnabled(enabled != 0, C.GoString(session))
 }
 
 //export isConnectionHistoryEnabled

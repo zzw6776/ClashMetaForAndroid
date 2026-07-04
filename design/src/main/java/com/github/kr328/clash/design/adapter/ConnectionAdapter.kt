@@ -37,6 +37,11 @@ sealed class ConnectionItem {
         val error: String? = null,
         val count: Int = 1
     ) : ConnectionItem()
+    data class LoadMore(
+        val process: String? = null,
+        val loadedCount: Int,
+        val totalCount: Int
+    ) : ConnectionItem()
 }
 
 enum class ConnectionStatus {
@@ -61,6 +66,7 @@ private fun formatTotalTraffic(uploadText: String, downloadText: String): CharSe
 class ConnectionAdapter(
     private val context: Context,
     private val onGroupClick: (String) -> Unit,
+    private val onLoadMore: (String?) -> Unit,
     private val onClick: (Connection) -> Unit
 ) : ListAdapter<ConnectionItem, RecyclerView.ViewHolder>(ConnectionDiffCallback()) {
 
@@ -71,6 +77,9 @@ class ConnectionAdapter(
             }
             if (oldItem is ConnectionItem.Child && newItem is ConnectionItem.Child) {
                 return oldItem.connection.id == newItem.connection.id
+            }
+            if (oldItem is ConnectionItem.LoadMore && newItem is ConnectionItem.LoadMore) {
+                return oldItem.process == newItem.process
             }
             return false
         }
@@ -88,6 +97,7 @@ class ConnectionAdapter(
                         oldItem.isExpanded == newItem.isExpanded
                 }
                 oldItem is ConnectionItem.Child && newItem is ConnectionItem.Child -> oldItem == newItem
+                oldItem is ConnectionItem.LoadMore && newItem is ConnectionItem.LoadMore -> oldItem == newItem
                 else -> false
             }
         }
@@ -97,13 +107,15 @@ class ConnectionAdapter(
         return when (getItem(position)) {
             is ConnectionItem.Group -> 0
             is ConnectionItem.Child -> 1
+            is ConnectionItem.LoadMore -> 2
         }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         return when (viewType) {
             0 -> GroupHolder(AdapterConnectionGroupBinding.inflate(context.layoutInflater, parent, false))
-            else -> ChildHolder(AdapterConnectionItemBinding.inflate(context.layoutInflater, parent, false))
+            1 -> ChildHolder(AdapterConnectionItemBinding.inflate(context.layoutInflater, parent, false))
+            else -> LoadMoreHolder(AdapterConnectionGroupBinding.inflate(context.layoutInflater, parent, false))
         }
     }
 
@@ -111,6 +123,7 @@ class ConnectionAdapter(
         when (val item = getItem(position)) {
             is ConnectionItem.Group -> (holder as GroupHolder).bind(item)
             is ConnectionItem.Child -> (holder as ChildHolder).bind(item)
+            is ConnectionItem.LoadMore -> (holder as LoadMoreHolder).bind(item)
         }
     }
 
@@ -126,6 +139,9 @@ class ConnectionAdapter(
         }
 
         fun bind(item: ConnectionItem.Group) {
+            binding.appIcon.visibility = android.view.View.VISIBLE
+            binding.speed.visibility = android.view.View.VISIBLE
+            binding.connectionCount.visibility = android.view.View.VISIBLE
             val groupAlpha = if (item.activeCount == 0) 0.55f else 1f
             binding.appName.text = "${item.appName} · ${item.activeCount}/${item.totalCount}"
             binding.speed.text = item.totalSpeed
@@ -144,6 +160,29 @@ class ConnectionAdapter(
                 binding.appIcon.setImageDrawable(null)
             }
             binding.ivExpandIcon.rotation = if (item.isExpanded) 180f else 0f
+        }
+    }
+
+    inner class LoadMoreHolder(private val binding: AdapterConnectionGroupBinding) : RecyclerView.ViewHolder(binding.root) {
+        init {
+            binding.root.setOnClickListener {
+                val item = currentList.getOrNull(bindingAdapterPosition) as? ConnectionItem.LoadMore
+                if (item != null) onLoadMore(item.process)
+            }
+        }
+
+        fun bind(item: ConnectionItem.LoadMore) {
+            binding.appIcon.visibility = android.view.View.GONE
+            binding.speed.visibility = android.view.View.GONE
+            binding.connectionCount.visibility = android.view.View.GONE
+            binding.appName.alpha = 1f
+            binding.appName.text = context.getString(
+                R.string.connections_load_more,
+                item.loadedCount,
+                item.totalCount
+            )
+            binding.ivExpandIcon.alpha = 0.55f
+            binding.ivExpandIcon.rotation = 0f
         }
     }
 

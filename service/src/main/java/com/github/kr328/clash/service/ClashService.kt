@@ -14,12 +14,15 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 class ClashService : BaseService() {
     private val self: ClashService
         get() = this
 
     private var reason: String? = null
+    private var accepted = false
+    private var runtimeLaunched = false
 
     private val runtime = clashRuntime {
         val store = ServiceStore(self)
@@ -35,6 +38,7 @@ class ClashService : BaseService() {
 
         install(AppListCacheModule(self))
         install(TimeZoneModule(self))
+        install(ConnectionHistoryModule(self))
 
         try {
             while (isActive) {
@@ -72,14 +76,23 @@ class ClashService : BaseService() {
             return stopSelf()
 
         StatusProvider.serviceRunning = true
+        accepted = true
 
         StaticNotificationModule.createNotificationChannel(this)
         StaticNotificationModule.notifyLoadingNotification(this)
 
-        runtime.launch()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!accepted) return START_NOT_STICKY
+
+        if (!runtimeLaunched) {
+            if (intent != null) {
+                ServiceStore(this).connectionHistorySessionId = UUID.randomUUID().toString()
+            }
+            runtimeLaunched = true
+            runtime.launch()
+        }
         sendClashStarted()
 
         return START_STICKY

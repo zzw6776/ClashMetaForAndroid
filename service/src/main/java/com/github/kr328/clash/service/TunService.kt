@@ -19,12 +19,15 @@ import com.github.kr328.clash.service.util.sendClashStarted
 import com.github.kr328.clash.service.util.sendClashStopped
 import kotlinx.coroutines.*
 import kotlinx.coroutines.selects.select
+import java.util.UUID
 
 class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.Default) {
     private val self: TunService
         get() = this
 
     private var reason: String? = null
+    private var accepted = false
+    private var runtimeLaunched = false
 
     private val runtime = clashRuntime {
         val store = ServiceStore(self)
@@ -41,6 +44,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
 
         install(AppListCacheModule(self))
         install(TimeZoneModule(self))
+        install(ConnectionHistoryModule(self))
 
         try {
             tun.open()
@@ -86,14 +90,23 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
             return stopSelf()
 
         StatusProvider.serviceRunning = true
+        accepted = true
 
         StaticNotificationModule.createNotificationChannel(this)
         StaticNotificationModule.notifyLoadingNotification(this)
 
-        runtime.launch()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!accepted) return START_NOT_STICKY
+
+        if (!runtimeLaunched) {
+            if (intent != null) {
+                ServiceStore(this).connectionHistorySessionId = UUID.randomUUID().toString()
+            }
+            runtimeLaunched = true
+            runtime.launch()
+        }
         sendClashStarted()
 
         return START_STICKY

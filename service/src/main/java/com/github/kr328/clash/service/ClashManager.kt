@@ -7,11 +7,15 @@ import com.github.kr328.clash.core.model.*
 import com.github.kr328.clash.service.data.Selection
 import com.github.kr328.clash.service.data.SelectionDao
 import com.github.kr328.clash.service.remote.IClashManager
+import com.github.kr328.clash.service.data.ConnectionHistoryRepository
+import com.github.kr328.clash.service.clash.ConnectionHistoryController
+import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.remote.IConnectionObserver
 import com.github.kr328.clash.service.remote.ILogObserver
-import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.util.sendOverrideChanged
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.channels.ReceiveChannel
 
 class ClashManager(private val context: Context) : IClashManager,
@@ -54,9 +58,12 @@ class ClashManager(private val context: Context) : IClashManager,
                 connectionObserverJob = launch {
                     var lastConnections = emptyMap<String, Connection>()
                     var lastProcessTraffic = emptyMap<String, ProcessTraffic>()
-                    var lastClosedConnectionIds = emptySet<String>()
-                    var lastFailedConnectionIds = emptySet<String>()
+                    var lastHistoryRevision = ConnectionHistoryRepository.revision
                     var activeTrafficIds = emptySet<String>()
+                    val persistedEvents = Channel<ConnectionHistoryEvents>(Channel.UNLIMITED)
+                    val persistedEventsJob = launch {
+                        ConnectionHistoryRepository.events.collect { persistedEvents.send(it) }
+                    }
                     try {
                         while (isActive) {
                             try {
@@ -64,22 +71,36 @@ class ClashManager(private val context: Context) : IClashManager,
                                 if (json != null) {
                                     val snapshot = Clash.parseConnectionSnapshot(json)
                                     val currentConnections = snapshot?.connections?.associateBy { it.id } ?: emptyMap()
-                                    val currentProcessTraffic = snapshot?.processTraffic ?: emptyMap()
-                                    val currentClosedConnections = snapshot?.closedConnections ?: emptyList()
-                                    val currentClosedConnectionIds = currentClosedConnections.mapTo(mutableSetOf()) { it.id }
-                                    val currentFailedConnections = snapshot?.failedConnections ?: emptyList()
-                                    val currentFailedConnectionIds = currentFailedConnections.mapTo(mutableSetOf()) { it.id }
+                                    val currentProcessTraffic = ConnectionHistoryRepository.queryProcessTraffic()
+                                    val currentHistoryRevision = ConnectionHistoryRepository.revision
 
                                     val newConnections = mutableListOf<Connection>()
-                                    val newFailedConnections = currentFailedConnections.filter { it.id !in lastFailedConnectionIds }
+                                    val newFailedConnections = mutableListOf<FailedConnection>()
                                     val removedConnections = mutableListOf<String>()
-                                    val removedConnectionDetails = currentClosedConnections
-                                        .filter { it.id !in lastClosedConnectionIds }
-                                        .toMutableList()
+                                    val removedConnectionDetails = mutableListOf<Connection>()
+                                    val removedConnectionClosedAt = mutableMapOf<String, Long>()
                                     val updatedTraffics = mutableListOf<ConnectionTraffic>()
                                     val changedTrafficIds = mutableSetOf<String>()
-                                    val removedConnectionDetailIds = removedConnectionDetails
-                                        .mapTo(mutableSetOf()) { it.id }
+                                    var persistedHistoryChanged = false
+
+                                    while (true) {
+                                        val events = persistedEvents.tryReceive().getOrNull() ?: break
+                                        persistedHistoryChanged = persistedHistoryChanged ||
+                                            events.closedConnections.isNotEmpty() ||
+                                            events.failedConnections.isNotEmpty()
+                                        removedConnectionDetails.addAll(events.closedConnections)
+                                        removedConnections.addAll(events.closedConnections.map { it.id })
+                                        removedConnectionClosedAt.putAll(events.closedAt)
+                                        newFailedConnections.addAll(events.failedConnections)
+                                    }
+                                    val removedConnectionDetailIds = removedConnectionDetails.mapTo(mutableSetOf()) { it.id }
+                                    val historyOverview = if (
+                                        persistedHistoryChanged || currentHistoryRevision != lastHistoryRevision
+                                    ) {
+                                        ConnectionHistoryRepository.queryOverview()
+                                    } else {
+                                        null
+                                    }
 
                                     for ((id, conn) in currentConnections) {
                                         val last = lastConnections[id]
@@ -113,30 +134,26 @@ class ClashManager(private val context: Context) : IClashManager,
                                         removedConnections.isNotEmpty() ||
                                         removedConnectionDetails.isNotEmpty() ||
                                         updatedTraffics.isNotEmpty() ||
+                                        historyOverview != null ||
                                         currentProcessTraffic != lastProcessTraffic
                                     ) {
-                                        val diff = ConnectionDiff(
-                                            timestamp = System.currentTimeMillis(),
+                                        sendConnectionDiffBatched(
+                                            observer = observer,
                                             totalUpload = snapshot?.uploadTotal ?: 0L,
                                             totalDownload = snapshot?.downloadTotal ?: 0L,
                                             processTraffic = currentProcessTraffic,
+                                            historyOverview = historyOverview,
                                             newConnections = newConnections,
                                             newFailedConnections = newFailedConnections,
                                             removedConnections = removedConnections,
                                             removedConnectionDetails = removedConnectionDetails,
+                                            removedConnectionClosedAt = removedConnectionClosedAt,
                                             updatedTraffics = updatedTraffics
                                         )
-
-                                        try {
-                                            observer.onConnectionDiff(diff)
-                                        } catch (e: Exception) {
-                                            Log.w("Failed to send connection diff via IPC", e)
-                                        }
                                     }
                                     lastConnections = currentConnections
                                     lastProcessTraffic = currentProcessTraffic
-                                    lastClosedConnectionIds = currentClosedConnectionIds
-                                    lastFailedConnectionIds = currentFailedConnectionIds
+                                    lastHistoryRevision = currentHistoryRevision
                                     activeTrafficIds = changedTrafficIds
                                 }
                             } catch (e: CancellationException) {
@@ -148,6 +165,8 @@ class ClashManager(private val context: Context) : IClashManager,
                         }
                     } catch (e: CancellationException) {
                         // ignore
+                    } finally {
+                        persistedEventsJob.cancel()
                     }
                 }
             }
@@ -158,7 +177,9 @@ class ClashManager(private val context: Context) : IClashManager,
         if (!enabled) {
             setConnectionObserver(null, 0L)
         }
-        Clash.setConnectionHistoryEnabled(enabled)
+        runBlocking(Dispatchers.IO) {
+            ConnectionHistoryController.setEnabled(store, enabled)
+        }
     }
 
     override fun isConnectionHistoryEnabled(): Boolean {
@@ -168,27 +189,107 @@ class ClashManager(private val context: Context) : IClashManager,
     override fun queryConnectionHistory(): ConnectionDiff {
         val snapshot = Clash.queryConnectionSnapshot()
         val active = snapshot?.connections.orEmpty()
-        val closed = snapshot?.closedConnections.orEmpty()
-        val failed = snapshot?.failedConnections.orEmpty()
+        val processTraffic = runBlocking(Dispatchers.IO) {
+            ConnectionHistoryRepository.queryProcessTraffic()
+        }
         return ConnectionDiff(
             timestamp = System.currentTimeMillis(),
             totalUpload = snapshot?.uploadTotal ?: 0L,
             totalDownload = snapshot?.downloadTotal ?: 0L,
-            processTraffic = snapshot?.processTraffic ?: emptyMap(),
+            processTraffic = processTraffic,
             newConnections = active,
-            newFailedConnections = failed,
-            removedConnections = closed.map { it.id },
-            removedConnectionDetails = closed,
+            newFailedConnections = emptyList(),
+            removedConnections = emptyList(),
+            removedConnectionDetails = emptyList(),
             updatedTraffics = emptyList()
         )
+    }
+
+    override fun queryConnectionHistoryOverview(): ConnectionHistoryOverview {
+        return runBlocking(Dispatchers.IO) {
+            ConnectionHistoryRepository.queryOverview()
+        }
+    }
+
+    override fun queryConnectionHistoryPage(
+        offset: Int,
+        limit: Int,
+        process: String,
+        proxy: String,
+        includeClosed: Boolean,
+        includeFailed: Boolean
+    ): ConnectionHistoryPage {
+        return runBlocking(Dispatchers.IO) {
+            ConnectionHistoryRepository.queryPage(
+                offset,
+                limit,
+                process,
+                proxy,
+                includeClosed,
+                includeFailed
+            )
+        }
     }
 
     override fun closeConnection(id: String) {
         Clash.closeConnection(id)
     }
 
+    private fun sendConnectionDiffBatched(
+        observer: IConnectionObserver,
+        totalUpload: Long,
+        totalDownload: Long,
+        processTraffic: Map<String, ProcessTraffic>,
+        historyOverview: ConnectionHistoryOverview?,
+        newConnections: List<Connection>,
+        newFailedConnections: List<FailedConnection>,
+        removedConnections: List<String>,
+        removedConnectionDetails: List<Connection>,
+        removedConnectionClosedAt: Map<String, Long>,
+        updatedTraffics: List<ConnectionTraffic>
+    ) {
+        val itemCount = maxOf(
+            newConnections.size,
+            newFailedConnections.size,
+            removedConnections.size,
+            removedConnectionDetails.size,
+            updatedTraffics.size,
+            1
+        )
+        for (offset in 0 until itemCount step CONNECTION_DIFF_BATCH_SIZE) {
+            val removedDetailsBatch = removedConnectionDetails
+                .drop(offset)
+                .take(CONNECTION_DIFF_BATCH_SIZE)
+            val diff = ConnectionDiff(
+                timestamp = System.currentTimeMillis(),
+                totalUpload = totalUpload,
+                totalDownload = totalDownload,
+                processTraffic = processTraffic,
+                historyOverview = if (offset == 0) historyOverview else null,
+                newConnections = newConnections.drop(offset).take(CONNECTION_DIFF_BATCH_SIZE),
+                newFailedConnections = newFailedConnections.drop(offset).take(CONNECTION_DIFF_BATCH_SIZE),
+                removedConnections = removedConnections.drop(offset).take(CONNECTION_DIFF_BATCH_SIZE),
+                removedConnectionDetails = removedDetailsBatch,
+                removedConnectionClosedAt = removedDetailsBatch.mapNotNull { connection ->
+                    removedConnectionClosedAt[connection.id]?.let { connection.id to it }
+                }.toMap(),
+                updatedTraffics = updatedTraffics.drop(offset).take(CONNECTION_DIFF_BATCH_SIZE)
+            )
+            try {
+                observer.onConnectionDiff(diff)
+            } catch (e: Exception) {
+                Log.w("Failed to send connection diff via IPC", e)
+                break
+            }
+        }
+    }
+
     override fun queryOverride(slot: Clash.OverrideSlot): ConfigurationOverride {
         return Clash.queryOverride(slot)
+    }
+
+    companion object {
+        private const val CONNECTION_DIFF_BATCH_SIZE = 100
     }
 
     override fun patchSelector(group: String, name: String): Boolean {

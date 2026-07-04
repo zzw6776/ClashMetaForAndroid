@@ -214,13 +214,39 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeQueryConnections(JNIEnv *en
     return new_string(response);
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativePeekConnectionHistoryEvents(JNIEnv *env,
+                                                                                 jobject thiz,
+                                                                                 jint limit) {
+    TRACE_METHOD();
+
+    scoped_string response = peekConnectionHistoryEvents((int) limit);
+
+    if (response == NULL)
+        return NULL;
+
+    return new_string(response);
+}
+
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeAckConnectionHistoryEvents(JNIEnv *env,
+                                                                                jobject thiz,
+                                                                                jlong token,
+                                                                                jlong sequence) {
+    TRACE_METHOD();
+
+    ackConnectionHistoryEvents((long long) token, (long long) sequence);
+}
+
 JNIEXPORT void JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeSetConnectionHistoryEnabled(JNIEnv *env,
                                                                                  jobject thiz,
-                                                                                 jboolean enabled) {
+                                                                                 jboolean enabled,
+                                                                                 jstring session) {
     TRACE_METHOD();
 
-    setConnectionHistoryEnabled((int) enabled);
+    scoped_string _session = get_string(session);
+    setConnectionHistoryEnabled((int) enabled, _session);
 }
 
 JNIEXPORT jboolean JNICALL

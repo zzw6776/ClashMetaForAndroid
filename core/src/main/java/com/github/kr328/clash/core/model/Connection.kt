@@ -35,6 +35,16 @@ data class ConnectionSnapshot(
 }
 
 @Serializable
+data class ConnectionHistoryEvents(
+    val ackToken: Long = 0,
+    val ackSequence: Long = 0,
+    val closedConnections: List<Connection> = emptyList(),
+    val closedAt: Map<String, Long> = emptyMap(),
+    val failedConnections: List<FailedConnection> = emptyList(),
+    val failedAt: Map<String, Long> = emptyMap()
+)
+
+@Serializable
 data class FailedConnection(
     val id: String = "",
     val metadata: Metadata = Metadata(),

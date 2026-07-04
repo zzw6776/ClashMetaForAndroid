@@ -3,6 +3,7 @@ package com.github.kr328.clash
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.model.Connection
 import com.github.kr328.clash.core.model.ConnectionDiff
+import com.github.kr328.clash.core.model.ConnectionHistoryGroup
 import com.github.kr328.clash.core.model.FailedConnection
 import com.github.kr328.clash.core.model.ProcessTraffic
 import com.github.kr328.clash.design.ConnectionsDesign
@@ -44,12 +45,10 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         val packageIcons = mutableMapOf<String, android.graphics.drawable.Drawable?>()
         val collapsedGroups = mutableSetOf<String>()
         design.updateExpandCollapseIconState(collapsedGroups.isNotEmpty())
-        val closedConnectionIds = mutableSetOf<String>()
-        val closedConnectionOrder = java.util.ArrayDeque<String>()
-        val failedConnectionOrder = java.util.ArrayDeque<String>()
         var processTrafficTotals = emptyMap<String, ProcessTraffic>()
         var observerRegistered = false
         var awaitingSnapshotReconcile = false
+        var historyPreferenceSynchronized = false
         var selectedProcessKey: String? = uiStore.connectionProcessFilter.takeIf { it.isNotBlank() }
         var selectedProxyKey: String? = uiStore.connectionProxyFilter.takeIf { it.isNotBlank() }
         var detailsBinding: DesignConnectionDetailsBinding? = null
@@ -57,6 +56,19 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         var detailsRefresh: (() -> Unit)? = null
         val clockTimeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         lateinit var refreshConnectionList: (scrollToTop: Boolean) -> Unit
+        lateinit var reloadConnectionHistory: suspend () -> Unit
+        lateinit var loadNextConnectionHistoryPage: suspend () -> Unit
+        lateinit var loadNextProcessHistoryPage: suspend (String) -> Unit
+        var historyOverviewGroups = emptyList<ConnectionHistoryGroup>()
+        var historyNextOffset = 0
+        var historyTotalCount = 0
+        var historyHasMore = false
+        var historyPageLoading = false
+        var historyLoadGeneration = 0
+        val historyProcessOffsets = mutableMapOf<String, Int>()
+        val historyProcessTotals = mutableMapOf<String, Int>()
+        val historyProcessHasMore = mutableSetOf<String>()
+        val historyProcessLoading = mutableSetOf<String>()
 
         fun normalizeProcessName(process: String?): String {
             return process?.substringBefore(":")?.takeIf { it.isNotBlank() } ?: UNKNOWN_PACKAGE
@@ -172,6 +184,25 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             }
         }
 
+        fun historyStatusVisible(status: String): Boolean {
+            return when (status) {
+                "CLOSED", "INTERRUPTED" -> design.filterClosed
+                "FAILED" -> design.filterFailed
+                else -> false
+            }
+        }
+
+        fun matchingHistoryGroups(
+            process: String? = selectedProcessKey,
+            proxy: String? = selectedProxyKey
+        ): List<ConnectionHistoryGroup> {
+            return historyOverviewGroups.filter { group ->
+                historyStatusVisible(group.status) &&
+                    (process == null || group.process == process) &&
+                    if (proxy == null) group.proxy.isEmpty() else group.proxy == proxy
+            }
+        }
+
         fun FailedConnection.toDisplayConnection(): Connection {
             val displayChains = chains.orEmpty().ifEmpty {
                 listOfNotNull(proxy.takeIf { it.isNotBlank() })
@@ -187,22 +218,12 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             )
         }
 
-        fun pruneClosedConnections() {
-            while (closedConnectionIds.size > MAX_CLOSED_CONNECTIONS && closedConnectionOrder.isNotEmpty()) {
-                val expiredId = closedConnectionOrder.removeFirst()
-                if (closedConnectionIds.remove(expiredId)) {
-                    connectionRecords.remove(expiredId)
-                    connectionSpeeds.remove(expiredId)
-                    connectionUploadSpeeds.remove(expiredId)
-                }
-            }
-            while (failedConnectionRecords.size > MAX_FAILED_CONNECTIONS && failedConnectionOrder.isNotEmpty()) {
-                val expiredId = failedConnectionOrder.removeFirst()
-                failedConnectionRecords.remove(expiredId)
-            }
-        }
-
-        fun markConnectionClosed(id: String, connection: Connection? = null, closedAtMillis: Long = System.currentTimeMillis()) {
+        fun markConnectionClosed(
+            id: String,
+            connection: Connection? = null,
+            closedAtMillis: Long = System.currentTimeMillis(),
+            authoritativeClosedAt: Boolean = false
+        ) {
             val record = connectionRecords[id]
             if (record != null) {
                 if (connection != null) {
@@ -212,7 +233,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                         record.startMillis = parsedStartMillis
                     }
                 }
-                record.close(closedAtMillis)
+                record.close(closedAtMillis, authoritativeClosedAt)
             } else if (connection != null) {
                 val startMillis = parseConnectionStartMillis(connection.start)
                 connectionRecords[id] = ConnectionRecord(
@@ -225,9 +246,6 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 return
             }
 
-            if (closedConnectionIds.add(id)) {
-                closedConnectionOrder.addLast(id)
-            }
             connectionSpeeds[id] = 0L
             connectionUploadSpeeds[id] = 0L
         }
@@ -314,16 +332,31 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         }
 
         val diffChannel = Channel<ConnectionDiff>(Channel.UNLIMITED)
+        val deferredConnectionDiffs = mutableListOf<ConnectionDiff>()
+        var historyReloading = false
 
         val adapter = com.github.kr328.clash.design.adapter.ConnectionAdapter(
             context = this,
             onGroupClick = { packageName ->
-                if (collapsedGroups.contains(packageName)) {
+                val expanding = collapsedGroups.contains(packageName)
+                if (expanding) {
                     collapsedGroups.remove(packageName)
                 } else {
                     collapsedGroups.add(packageName)
                 }
                 refreshConnectionList(false)
+                if (expanding) {
+                    launch { loadNextProcessHistoryPage(packageName) }
+                }
+            },
+            onLoadMore = { process ->
+                launch {
+                    if (process == null) {
+                        loadNextConnectionHistoryPage()
+                    } else {
+                        loadNextProcessHistoryPage(process)
+                    }
+                }
             },
             onClick = { conn ->
                 val binding = DesignConnectionDetailsBinding.inflate(layoutInflater)
@@ -598,6 +631,8 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 val grouped = allDisplayRecords.groupBy {
                     normalizeProcessName(it.connection.metadata.process)
                 }
+                val historyGroups = matchingHistoryGroups(processFilter, proxyFilter)
+                val historyGroupsByProcess = historyGroups.groupBy { it.process }
                 data class ProcessGroup(
                     val process: String,
                     val records: List<DisplayRecord>
@@ -606,9 +641,14 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     process: String,
                     records: List<DisplayRecord>
                 ): ProcessTraffic {
-                    return processTrafficTotals[process] ?: ProcessTraffic(
-                        upload = records.sumOf { it.connection.upload },
-                        download = records.sumOf { it.connection.download }
+                    if (proxyFilter == null) {
+                        processTrafficTotals[process]?.let { return it }
+                    }
+                    val activeRecords = records.filter { it.status == ConnectionStatus.ACTIVE }
+                    val historical = historyGroupsByProcess[process].orEmpty()
+                    return ProcessTraffic(
+                        upload = activeRecords.sumOf { it.connection.upload } + historical.sumOf { it.totalUpload },
+                        download = activeRecords.sumOf { it.connection.download } + historical.sumOf { it.totalDownload }
                     )
                 }
 
@@ -616,21 +656,21 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     grouped.forEach { (process, records) ->
                         add(ProcessGroup(process, records))
                     }
-                    if (filterClosed && proxyFilter == null) {
-                        processTrafficTotals.forEach { (process, traffic) ->
-                            if (processFilter != null && process != processFilter) return@forEach
-                            if (process in grouped) return@forEach
-                            if (traffic.upload <= 0L && traffic.download <= 0L) return@forEach
-                            add(ProcessGroup(process, emptyList()))
-                        }
+                    historyGroupsByProcess.keys.forEach { process ->
+                        if (processFilter != null && process != processFilter) return@forEach
+                        if (process !in grouped) add(ProcessGroup(process, emptyList()))
                     }
                 }
 
                 val sortedGrouped = processGroups.sortedWith { a, b ->
                     when (sortType) {
                         ConnectionsDesign.SortType.TIME -> {
-                            val timeA = a.records.minOfOrNull { it.startMillis ?: Long.MAX_VALUE } ?: Long.MAX_VALUE
-                            val timeB = b.records.minOfOrNull { it.startMillis ?: Long.MAX_VALUE } ?: Long.MAX_VALUE
+                            val timeA = a.records.minOfOrNull { it.startMillis ?: Long.MAX_VALUE }
+                                ?: historyGroupsByProcess[a.process].orEmpty().minOfOrNull { it.oldestUpdatedAt }
+                                ?: Long.MAX_VALUE
+                            val timeB = b.records.minOfOrNull { it.startMillis ?: Long.MAX_VALUE }
+                                ?: historyGroupsByProcess[b.process].orEmpty().minOfOrNull { it.oldestUpdatedAt }
+                                ?: Long.MAX_VALUE
                             timeA.compareTo(timeB).takeIf { it != 0 } ?: a.process.compareTo(b.process, ignoreCase = true)
                         }
                         ConnectionsDesign.SortType.NAME -> a.process.compareTo(b.process, ignoreCase = true)
@@ -766,6 +806,14 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     val totalUploadSpeedBytes = conns.sumOf { connectionUploadSpeeds[it.connection.id] ?: 0L }
                     val totalSpeed = "↑ ${formatTraffic(totalUploadSpeedBytes)}  ↓ ${formatTraffic(totalSpeedBytes)}"
                     val processTraffic = processTrafficForGroup(basePackage, conns.map { DisplayRecord(it.connection, it.status, it.startMillis, it.error) })
+                    val historicalTotalCount = historyGroupsByProcess[basePackage].orEmpty().sumOf { it.totalCount }
+                    val loadedHistoricalCount = conns.count { it.status != ConnectionStatus.ACTIVE }
+                    val processLoadedOffset = historyProcessOffsets[basePackage] ?: 0
+                    val processTotal = historyProcessTotals[basePackage] ?: historicalTotalCount
+                    val processHasMore = selectedProcessKey == null && (
+                        basePackage in historyProcessHasMore ||
+                            (processLoadedOffset == 0 && loadedHistoricalCount < historicalTotalCount)
+                        )
 
                     val isExpanded = !collapsedGroups.contains(basePackage)
                     items.add(
@@ -774,7 +822,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             appName = appName,
                             appIcon = appIcon,
                             activeCount = activeCount,
-                            totalCount = conns.size,
+                            totalCount = activeCount + maxOf(historicalTotalCount, loadedHistoricalCount),
                             totalSpeed = totalSpeed,
                             totalUpload = processTraffic.upload,
                             totalDownload = processTraffic.download,
@@ -798,7 +846,24 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 )
                             )
                         }
+                        if (processHasMore) {
+                            items.add(
+                                com.github.kr328.clash.design.adapter.ConnectionItem.LoadMore(
+                                    process = basePackage,
+                                    loadedCount = processLoadedOffset.coerceAtLeast(loadedHistoricalCount),
+                                    totalCount = processTotal
+                                )
+                            )
+                        }
                     }
+                }
+                if (historyHasMore) {
+                    items.add(
+                        com.github.kr328.clash.design.adapter.ConnectionItem.LoadMore(
+                            loadedCount = historyNextOffset,
+                            totalCount = historyTotalCount
+                        )
+                    )
                 }
 
                 adapter.submitList(items) {
@@ -813,15 +878,26 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             }
         }
 
-        fun clearConnectionList(resetProcessFilter: Boolean = true) {
+        fun clearConnectionList(
+            resetProcessFilter: Boolean = true,
+            updateAdapter: Boolean = true,
+            invalidateHistoryLoad: Boolean = true
+        ) {
+            if (invalidateHistoryLoad) historyLoadGeneration++
+            historyNextOffset = 0
+            historyTotalCount = 0
+            historyHasMore = false
+            historyPageLoading = false
+            historyOverviewGroups = emptyList()
+            historyProcessOffsets.clear()
+            historyProcessTotals.clear()
+            historyProcessHasMore.clear()
+            historyProcessLoading.clear()
             connectionRecords.clear()
             mergedConnectionRecords.clear()
             failedConnectionRecords.clear()
-            failedConnectionOrder.clear()
             connectionSpeeds.clear()
             connectionUploadSpeeds.clear()
-            closedConnectionIds.clear()
-            closedConnectionOrder.clear()
             if (resetProcessFilter) {
                 selectedProcessKey = null
                 selectedProxyKey = null
@@ -830,7 +906,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 design.setProcessFilterLabel(null)
                 design.setProxyFilterLabel(null)
             }
-            adapter.submitList(emptyList())
+            if (updateAdapter) adapter.submitList(emptyList())
         }
 
         fun showProcessFilterMenu() {
@@ -850,13 +926,8 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     menuProcessKeys.add(normalizeProcessName(failed.metadata.process))
                 }
             }
-            if (design.filterClosed && selectedProxyKey == null) {
-                processTrafficTotals.forEach { (processKey, traffic) ->
-                    if (traffic.upload > 0L || traffic.download > 0L) {
-                        menuProcessKeys.add(processKey)
-                    }
-                }
-            }
+            matchingHistoryGroups(process = null, proxy = selectedProxyKey)
+                .mapTo(menuProcessKeys) { it.process }
             menuProcessKeys
                 .sortedBy { resolveAppName(it).lowercase(Locale.getDefault()) }
                 .forEach { processKey ->
@@ -895,6 +966,11 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                             }
                         }
                     }
+                    historyOverviewGroups
+                        .asSequence()
+                        .filter { historyStatusVisible(it.status) }
+                        .filter { it.process == selectedProcessKey && it.proxy.isNotEmpty() }
+                        .mapTo(availableProxies) { it.proxy }
                     if (!availableProxies.contains(selectedProxyKey)) {
                         selectedProxyKey = null
                         uiStore.connectionProxyFilter = ""
@@ -902,7 +978,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     }
                 }
                 
-                refreshConnectionList(true)
+                launch { reloadConnectionHistory() }
                 true
             }
             popup.show()
@@ -925,6 +1001,12 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     proxyNames.addAll(proxyNamesFor(failed))
                 }
             }
+            historyOverviewGroups
+                .asSequence()
+                .filter { historyStatusVisible(it.status) }
+                .filter { selectedProcessKey == null || it.process == selectedProcessKey }
+                .filter { it.proxy.isNotEmpty() }
+                .mapTo(proxyNames) { it.proxy }
             proxyNames
                 .filter { it.isNotBlank() }
                 .sortedWith(String.CASE_INSENSITIVE_ORDER)
@@ -941,16 +1023,17 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 selectedProxyKey = option.first
                 uiStore.connectionProxyFilter = option.first.orEmpty()
                 design.setProxyFilterLabel(option.second)
-                refreshConnectionList(true)
+                launch { reloadConnectionHistory() }
                 true
             }
             popup.show()
         }
 
-        fun applyConnectionDiff(diff: ConnectionDiff) {
+        fun applyConnectionDiff(diff: ConnectionDiff, refresh: Boolean = true) {
             try {
                 val batchMillis = System.currentTimeMillis()
                 processTrafficTotals = diff.processTraffic
+                diff.historyOverview?.let { historyOverviewGroups = it.groups }
                 val reconcileSnapshot = awaitingSnapshotReconcile && diff.timestamp > 0L
                 if (diff.timestamp > 0L) {
                     awaitingSnapshotReconcile = false
@@ -958,8 +1041,6 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 val newConnectionIds = diff.newConnections.mapTo(mutableSetOf()) { it.id }
 
                 for (conn in diff.newConnections) {
-                    closedConnectionIds.remove(conn.id)
-                    closedConnectionOrder.remove(conn.id)
                     if (!connectionRecords.containsKey(conn.id)) {
                         connectionSpeeds[conn.id] = 0L
                         connectionUploadSpeeds[conn.id] = 0L
@@ -972,9 +1053,6 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
                 for (failed in diff.newFailedConnections) {
                     if (failed.id.isBlank()) continue
-                    if (!failedConnectionRecords.containsKey(failed.id)) {
-                        failedConnectionOrder.addLast(failed.id)
-                    }
                     failedConnectionRecords[failed.id] = FailedConnectionRecord(
                         failedConnection = failed,
                         failedAtMillis = parseConnectionStartMillis(failed.failedAt)
@@ -983,12 +1061,21 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
                 val removedDetailIds = diff.removedConnectionDetails.mapTo(mutableSetOf()) { it.id }
                 for (conn in diff.removedConnectionDetails) {
-                    markConnectionClosed(conn.id, conn, batchMillis)
+                    markConnectionClosed(
+                        conn.id,
+                        conn,
+                        diff.removedConnectionClosedAt[conn.id] ?: batchMillis,
+                        conn.id in diff.removedConnectionClosedAt
+                    )
                 }
 
                 for (id in diff.removedConnections) {
                     if (id !in removedDetailIds) {
-                        markConnectionClosed(id, closedAtMillis = batchMillis)
+                        markConnectionClosed(
+                            id,
+                            closedAtMillis = diff.removedConnectionClosedAt[id] ?: batchMillis,
+                            authoritativeClosedAt = id in diff.removedConnectionClosedAt
+                        )
                     }
                 }
 
@@ -1000,8 +1087,6 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                         .toList()
                         .forEach { id -> markConnectionClosed(id, closedAtMillis = batchMillis) }
                 }
-                pruneClosedConnections()
-
                 val updatedTrafficIds = mutableSetOf<String>()
                 for (traffic in diff.updatedTraffics) {
                     if (traffic.id in newConnectionIds) continue
@@ -1023,7 +1108,9 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     }
                 }
 
-                refreshConnectionList(false)
+                if (refresh) {
+                    refreshConnectionList(false)
+                }
             } catch (e: Exception) {
                 Log.w("Failed to update connections UI", e)
             }
@@ -1068,22 +1155,189 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             }
         }
 
-        suspend fun loadConnectionHistory() {
-            val history = withContext(Dispatchers.IO) {
+        suspend fun ensureConnectionHistoryEnabled(): Boolean {
+            return withContext(Dispatchers.IO) {
                 withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
                     com.github.kr328.clash.util.withClash {
-                        this.queryConnectionHistory()
+                        if (!isConnectionHistoryEnabled()) {
+                            setConnectionHistoryEnabled(true)
+                        }
+                    }
+                    true
+                } ?: false
+            }
+        }
+
+        loadNextConnectionHistoryPage = loadNext@{
+            if (historyPageLoading || !historyHasMore) return@loadNext
+
+            val generation = historyLoadGeneration
+            val offset = historyNextOffset
+            historyPageLoading = true
+            try {
+                val page = withContext(Dispatchers.IO) {
+                    withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
+                        com.github.kr328.clash.util.withClash {
+                            queryConnectionHistoryPage(
+                                offset,
+                                HISTORY_PAGE_SIZE,
+                                selectedProcessKey.orEmpty(),
+                                selectedProxyKey.orEmpty(),
+                                design.filterClosed,
+                                design.filterFailed
+                            )
+                        }
+                    }
+                }
+                if (generation != historyLoadGeneration) return@loadNext
+                if (page == null) {
+                    Log.w("Failed to load connection history page at offset $offset")
+                    return@loadNext
+                }
+
+                applyConnectionDiff(
+                    ConnectionDiff(
+                        timestamp = System.currentTimeMillis(),
+                        processTraffic = processTrafficTotals,
+                        newFailedConnections = page.failedConnections,
+                        removedConnections = page.closedConnections.map { it.id },
+                        removedConnectionDetails = page.closedConnections,
+                        removedConnectionClosedAt = page.closedAt
+                    ),
+                    refresh = false
+                )
+                historyNextOffset = page.nextOffset
+                historyTotalCount = page.totalCount
+                historyHasMore = page.hasMore && page.nextOffset > offset
+                refreshConnectionList(false)
+            } finally {
+                if (generation == historyLoadGeneration) historyPageLoading = false
+            }
+        }
+
+        loadNextProcessHistoryPage = loadProcess@{ process ->
+            if (process in historyProcessLoading) return@loadProcess
+
+            val summaryTotal = matchingHistoryGroups(process, selectedProxyKey).sumOf { it.totalCount }
+            val offset = historyProcessOffsets[process] ?: 0
+            if (offset > 0 && process !in historyProcessHasMore) return@loadProcess
+            if (summaryTotal == 0) return@loadProcess
+
+            val generation = historyLoadGeneration
+            historyProcessLoading.add(process)
+            try {
+                val page = withContext(Dispatchers.IO) {
+                    withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
+                        com.github.kr328.clash.util.withClash {
+                            queryConnectionHistoryPage(
+                                offset,
+                                HISTORY_PAGE_SIZE,
+                                process,
+                                selectedProxyKey.orEmpty(),
+                                design.filterClosed,
+                                design.filterFailed
+                            )
+                        }
+                    }
+                }
+                if (generation != historyLoadGeneration) return@loadProcess
+                if (page == null) {
+                    Log.w("Failed to load history page for process $process at offset $offset")
+                    refreshConnectionList(false)
+                    return@loadProcess
+                }
+
+                applyConnectionDiff(
+                    ConnectionDiff(
+                        timestamp = System.currentTimeMillis(),
+                        processTraffic = processTrafficTotals,
+                        newFailedConnections = page.failedConnections,
+                        removedConnections = page.closedConnections.map { it.id },
+                        removedConnectionDetails = page.closedConnections,
+                        removedConnectionClosedAt = page.closedAt
+                    ),
+                    refresh = false
+                )
+                historyProcessOffsets[process] = page.nextOffset
+                historyProcessTotals[process] = page.totalCount
+                if (page.hasMore && page.nextOffset > offset) {
+                    historyProcessHasMore.add(process)
+                } else {
+                    historyProcessHasMore.remove(process)
+                }
+                refreshConnectionList(false)
+            } finally {
+                if (generation == historyLoadGeneration) historyProcessLoading.remove(process)
+            }
+        }
+
+        suspend fun loadConnectionHistory() {
+            historyLoadGeneration++
+            awaitingSnapshotReconcile = false
+            val generation = historyLoadGeneration
+            historyReloading = true
+
+            try {
+                val loaded = withContext(Dispatchers.IO) {
+                    withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
+                        com.github.kr328.clash.util.withClash {
+                            Triple(
+                                queryConnectionHistory(),
+                                queryConnectionHistoryOverview(),
+                                queryConnectionHistoryPage(
+                                    0,
+                                    HISTORY_PAGE_SIZE,
+                                    selectedProcessKey.orEmpty(),
+                                    selectedProxyKey.orEmpty(),
+                                    design.filterClosed,
+                                    design.filterFailed
+                                )
+                            )
+                        }
+                    }
+                }
+                if (loaded == null) {
+                    Log.w("Failed to load connection history")
+                    return
+                }
+                if (generation != historyLoadGeneration) return
+                val (summary, overview, firstPage) = loaded
+                clearConnectionList(
+                    resetProcessFilter = false,
+                    updateAdapter = false,
+                    invalidateHistoryLoad = false
+                )
+                historyOverviewGroups = overview.groups
+                applyConnectionDiff(summary, refresh = false)
+                applyConnectionDiff(
+                    ConnectionDiff(
+                        processTraffic = processTrafficTotals,
+                        newFailedConnections = firstPage.failedConnections,
+                        removedConnections = firstPage.closedConnections.map { it.id },
+                        removedConnectionDetails = firstPage.closedConnections,
+                        removedConnectionClosedAt = firstPage.closedAt
+                    ),
+                    refresh = false
+                )
+                historyNextOffset = firstPage.nextOffset
+                historyTotalCount = firstPage.totalCount
+                historyHasMore = firstPage.hasMore && firstPage.nextOffset > 0
+                deferredConnectionDiffs.forEach { applyConnectionDiff(it, refresh = false) }
+                deferredConnectionDiffs.clear()
+                refreshConnectionList(false)
+            } finally {
+                if (generation == historyLoadGeneration) {
+                    historyReloading = false
+                    if (deferredConnectionDiffs.isNotEmpty()) {
+                        deferredConnectionDiffs.forEach { applyConnectionDiff(it, refresh = false) }
+                        deferredConnectionDiffs.clear()
+                        refreshConnectionList(false)
                     }
                 }
             }
-            if (history != null) {
-                clearConnectionList(resetProcessFilter = false)
-                awaitingSnapshotReconcile = false
-                applyConnectionDiff(history)
-            } else {
-                Log.w("Failed to load connection history")
-            }
         }
+
+        reloadConnectionHistory = { loadConnectionHistory() }
 
         suspend fun resetConnectionHistory() {
             unregisterObserver()
@@ -1096,19 +1350,24 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         suspend fun registerObserver(force: Boolean = false) {
             if (!design.trackingEnabled) {
                 stopObserver()
+                if (!historyPreferenceSynchronized) {
+                    historyPreferenceSynchronized = setConnectionHistoryEnabled(false)
+                    if (!historyPreferenceSynchronized) {
+                        Log.w("Failed to disable connection history")
+                    }
+                }
                 return
             }
 
-            if (!setConnectionHistoryEnabled(true)) {
+            if (!ensureConnectionHistoryEnabled()) {
                 Log.w("Failed to enable connection history")
                 return
             }
+            historyPreferenceSynchronized = true
 
             if (!force && observerRegistered) {
                 return
             }
-
-            loadConnectionHistory()
 
             val registered = withContext(Dispatchers.IO) {
                 withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
@@ -1124,6 +1383,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             if (!registered) {
                 Log.w("Failed to register connection observer")
             }
+            loadConnectionHistory()
         }
 
         registerObserver(force = true)
@@ -1135,7 +1395,10 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                         when (it) {
                             Event.ActivityStart -> registerObserver(force = true)
                             Event.ActivityStop -> unregisterObserver()
-                            Event.ServiceRecreated -> registerObserver(force = true)
+                            Event.ServiceRecreated -> {
+                                historyPreferenceSynchronized = false
+                                registerObserver(force = true)
+                            }
                             else -> {}
                         }
                     }
@@ -1149,7 +1412,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                     registerObserver(force = true)
                                 }
                             }
-                            ConnectionsDesign.Request.FilterChanged -> refreshConnectionList(true)
+                            ConnectionsDesign.Request.FilterChanged -> loadConnectionHistory()
                             ConnectionsDesign.Request.ProcessFilterClicked -> showProcessFilterMenu()
                             ConnectionsDesign.Request.ProxyFilterClicked -> showProxyFilterMenu()
                             ConnectionsDesign.Request.RefreshIntervalChanged -> registerObserver(force = true)
@@ -1158,7 +1421,10 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                     registerObserver(force = true)
                                 } else {
                                     unregisterObserver()
-                                    setConnectionHistoryEnabled(false)
+                                    historyPreferenceSynchronized = setConnectionHistoryEnabled(false)
+                                    if (!historyPreferenceSynchronized) {
+                                        Log.w("Failed to disable connection history")
+                                    }
                                     clearConnectionList(resetProcessFilter = false)
                                 }
                             }
@@ -1184,17 +1450,8 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                                 } else {
                                     emptyList()
                                 }
-                                val trafficGroups = if (design.filterClosed && selectedProxyKey == null) {
-                                    processTrafficTotals
-                                        .filter { (process, traffic) ->
-                                            (selectedProcessKey == null || process == selectedProcessKey) &&
-                                                (traffic.upload > 0L || traffic.download > 0L)
-                                        }
-                                        .keys
-                                } else {
-                                    emptySet()
-                                }
-                                val allGroups = (recordGroups + failedGroups + trafficGroups).toSet()
+                                val historyGroups = matchingHistoryGroups().map { it.process }
+                                val allGroups = (recordGroups + failedGroups + historyGroups).toSet()
                                 collapsedGroups.retainAll(allGroups)
                                 if (collapsedGroups.isEmpty()) {
                                     collapsedGroups.addAll(allGroups)
@@ -1207,7 +1464,11 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     }
                         diffChannel.onReceive { diff ->
                             if (!design.trackingEnabled) return@onReceive
-                            applyConnectionDiff(diff)
+                            if (historyReloading) {
+                                deferredConnectionDiffs.add(diff)
+                            } else {
+                                applyConnectionDiff(diff)
+                            }
                         }
                 }
             }
@@ -1226,8 +1487,8 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         val closed: Boolean
             get() = closedMillis != null
 
-        fun close(closedAtMillis: Long) {
-            if (closedMillis != null) return
+        fun close(closedAtMillis: Long, authoritative: Boolean = false) {
+            if (closedMillis != null && !authoritative) return
 
             closedMillis = closedAtMillis
             durationMillis = startMillis?.let { (closedAtMillis - it).coerceAtLeast(0) }
@@ -1241,10 +1502,9 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
     companion object {
         private const val UNKNOWN_PACKAGE = "Unknown"
-        private const val MAX_CLOSED_CONNECTIONS = 5000
-        private const val MAX_FAILED_CONNECTIONS = 1000
         private const val MAX_REASONABLE_SPEED_BYTES_PER_SECOND = 10L * 1024L * 1024L * 1024L
         private const val REMOTE_CALL_TIMEOUT_MILLIS = 3_000L
+        private const val HISTORY_PAGE_SIZE = 100
         private const val MENU_CLOSE_CONNECTION = 1
 
         private val CONNECTION_START_FRACTION_REGEX = Regex("""\.(\d{1,9})(?=Z|[+-]\d{2}:?\d{2}$|$)""")
