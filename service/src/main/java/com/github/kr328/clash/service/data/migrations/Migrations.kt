@@ -64,6 +64,16 @@ private val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+private val MIGRATION_4_6 = object : Migration(4, 6) {
+    override fun migrate(database: SupportSQLiteDatabase) = Unit
+}
+
+private val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("DROP TABLE IF EXISTS connection_traffic_baselines")
+    }
+}
+
 private fun backfillConnectionHistoryProxies(database: SupportSQLiteDatabase) {
     val json = Json { ignoreUnknownKeys = true }
     val insert = database.compileStatement(
@@ -107,6 +117,8 @@ val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
     MIGRATION_3_4,
+    MIGRATION_4_6,
+    MIGRATION_5_6,
 )
 
 val LEGACY_MIGRATION = ::migrationFromLegacy

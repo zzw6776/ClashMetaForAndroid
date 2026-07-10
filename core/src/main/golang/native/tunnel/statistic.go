@@ -17,7 +17,7 @@ func Total() (up int64, down int64) {
 }
 
 func QueryConnections() *statistic.Snapshot {
-	return statistic.DefaultManager.Snapshot()
+	return statistic.DefaultManager.HistorySnapshot()
 }
 
 func PeekConnectionHistoryEvents(limit int) *statistic.HistoryEvents {
