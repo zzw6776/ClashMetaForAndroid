@@ -109,7 +109,7 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeNotifyInstalledAppChanged(J
     notifyInstalledAppsChanged(_uid_list);
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jstring JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeStartTun(JNIEnv *env, jobject thiz,
                                                               jint fd,
                                                               jstring stack,
@@ -125,7 +125,12 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeStartTun(JNIEnv *env, jobje
     scoped_string _dns = get_string(dns);
     jobject _interface = new_global(cb);
 
-    startTun(fd, _stack, _gateway, _portal, _dns, _interface);
+    scoped_string error = startTun(fd, _stack, _gateway, _portal, _dns, _interface);
+
+    if (error == NULL)
+        return NULL;
+
+    return new_string(error);
 }
 
 JNIEXPORT void JNICALL
@@ -279,27 +284,35 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativePatchSelector(JNIEnv *env, 
 
 JNIEXPORT void JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeLoad(JNIEnv *env, jobject thiz,
-                                                          jobject completable, jstring path) {
+                                                          jobject completable, jstring path,
+                                                          jboolean allow_config_inbounds) {
     TRACE_METHOD();
 
     jobject _completable = new_global(completable);
     scoped_string _path = get_string(path);
 
-    load(_completable, _path);
+    load(_completable, _path, allow_config_inbounds);
 }
 
 JNIEXPORT void JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeFetchAndValid(JNIEnv *env, jobject thiz,
                                                                     jobject callback,
                                                                     jstring path,
-                                                                    jstring url, jboolean force) {
+                                                                    jstring url,
+                                                                    jstring age_secret_key,
+                                                                    jboolean force,
+                                                                    jboolean allow_config_inbounds) {
     TRACE_METHOD();
 
     jobject _completable = new_global(callback);
     scoped_string _path = get_string(path);
     scoped_string _url = get_string(url);
+    scoped_string _age_secret_key = NULL;
+    if (age_secret_key != NULL)
+        _age_secret_key = get_string(age_secret_key);
 
-    fetchAndValid(_completable, _path, _url, force);
+    fetchAndValid(_completable, _path, _url, _age_secret_key, force,
+                  allow_config_inbounds);
 }
 
 JNIEXPORT void JNICALL
@@ -445,14 +458,22 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeQueryConfiguration(JNIEnv *
     return new_string(response);
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jlong JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeSubscribeLogcat(JNIEnv *env, jobject thiz,
                                                                      jobject callback) {
     TRACE_METHOD();
 
     jobject _callback = new_global(callback);
 
-    subscribeLogcat(_callback);
+    return (jlong) subscribeLogcat(_callback);
+}
+
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeUnsubscribeLogcat(JNIEnv *env, jobject thiz,
+                                                                       jlong subscription) {
+    TRACE_METHOD();
+
+    unsubscribeLogcat((long long) subscription);
 }
 
 
@@ -552,16 +573,16 @@ static int call_logcat_interface_received_impl(void *callback, const char *paylo
 
     ATTACH_JNI();
 
-    (*env)->CallVoidMethod(env,
-                           (jobject) callback,
-                           (jmethodID) m_logcat_interface_received,
-                           (jstring) new_string(payload));
+    jboolean accepted = (*env)->CallBooleanMethod(env,
+                                                  (jobject) callback,
+                                                  (jmethodID) m_logcat_interface_received,
+                                                  (jstring) new_string(payload));
 
     if (jni_catch_exception(env)) {
         return 1;
     }
 
-    return 0;
+    return accepted == JNI_TRUE ? 0 : 1;
 }
 
 static int open_content_impl(const char *url, char *error, int error_length) {
@@ -582,12 +603,20 @@ static int open_content_impl(const char *url, char *error, int error_length) {
                 (jmethodID) m_get_message
         );
 
-        if (message == NULL) {
-            strncpy(error, "unknown", error_length - 1);
-        } else {
-            scoped_string _message = get_string(message);
+        if (error != NULL && error_length > 0) {
+            const char *error_message = "unknown";
+            scoped_string _message = NULL;
 
-            strncpy(error, _message, error_length - 1);
+            if ((*env)->ExceptionCheck(env)) {
+                (*env)->ExceptionClear(env);
+            } else if (message != NULL) {
+                _message = get_string(message);
+                if (_message != NULL)
+                    error_message = _message;
+            }
+
+            strncpy(error, error_message, (size_t) error_length - 1);
+            error[error_length - 1] = '\0';
         }
 
         return -1;
@@ -637,7 +666,7 @@ JNI_OnLoad(JavaVM *vm, void *reserved) {
     m_completable_complete_exceptionally = find_method(c_completable, "completeExceptionally",
                                                        "(Ljava/lang/Throwable;)Z");
     m_logcat_interface_received = find_method(c_logcat_interface, "received",
-                                              "(Ljava/lang/String;)V");
+                                              "(Ljava/lang/String;)Z");
     m_clash_exception = find_method(_c_clash_exception, "<init>",
                                     "(Ljava/lang/String;)V");
     m_get_message = find_method(c_throwable, "getMessage",
@@ -663,6 +692,27 @@ JNI_OnLoad(JavaVM *vm, void *reserved) {
     release_object_func = &release_jni_object_impl;
 
     return JNI_VERSION_1_6;
+}
+
+JNIEXPORT void JNICALL
+JNI_OnUnload(JavaVM *vm, void *reserved) {
+    JNIEnv *env = NULL;
+    if ((*vm)->GetEnv(vm, (void **) &env, JNI_VERSION_1_6) != JNI_OK)
+        return;
+
+    if (c_clash_exception != NULL) {
+        del_global(c_clash_exception);
+        c_clash_exception = NULL;
+    }
+    if (c_content != NULL) {
+        del_global(c_content);
+        c_content = NULL;
+    }
+    if (o_unit != NULL) {
+        del_global(o_unit);
+        o_unit = NULL;
+    }
+    release_jni(env);
 }
 
 JNIEXPORT jstring JNICALL

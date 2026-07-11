@@ -26,7 +26,10 @@ class ProfileWorker : BaseService() {
     private val service: ProfileWorker
         get() = this
 
-    private val jobs = mutableListOf<Job>()
+    private val workLock = Any()
+    private var activeJobs = 0
+    private var lastStartId = 0
+    private var minimumLifetimeElapsed = false
 
     override fun onCreate() {
         super.onCreate()
@@ -37,12 +40,7 @@ class ProfileWorker : BaseService() {
 
         launch {
             delay(TimeUnit.SECONDS.toMillis(10))
-
-            while (true) {
-                jobs.removeFirstOrNull()?.join() ?: break
-            }
-
-            stopSelf()
+            stopWhenIdle(minimumLifetimeHasElapsed = true)
         }
     }
 
@@ -58,25 +56,53 @@ class ProfileWorker : BaseService() {
         when (intent?.action) {
             Intents.ACTION_PROFILE_REQUEST_UPDATE -> {
                 intent.uuid?.also {
-                    val job = launch {
+                    launchWork(startId) {
                         run(it)
                     }
-
-                    jobs.add(job)
-                }
+                } ?: stopWhenIdle(startId = startId)
             }
             Intents.ACTION_PROFILE_SCHEDULE_UPDATES -> {
-                val job = launch {
+                launchWork(startId) {
                     ProfileReceiver.rescheduleAll(service)
 
                     delay(TimeUnit.SECONDS.toMillis(30))
                 }
-
-                jobs.add(job)
             }
+            else -> stopWhenIdle(startId = startId)
         }
 
         return START_NOT_STICKY
+    }
+
+    private fun launchWork(startId: Int, block: suspend () -> Unit) {
+        synchronized(workLock) {
+            lastStartId = maxOf(lastStartId, startId)
+            activeJobs++
+        }
+
+        launch {
+            try {
+                block()
+            } finally {
+                stopWhenIdle(jobCompleted = true)
+            }
+        }
+    }
+
+    private fun stopWhenIdle(
+        startId: Int? = null,
+        jobCompleted: Boolean = false,
+        minimumLifetimeHasElapsed: Boolean = false
+    ) {
+        val stopStartId = synchronized(workLock) {
+            if (startId != null) lastStartId = maxOf(lastStartId, startId)
+            if (jobCompleted) activeJobs--
+            if (minimumLifetimeHasElapsed) minimumLifetimeElapsed = true
+
+            lastStartId.takeIf { activeJobs == 0 && minimumLifetimeElapsed }
+        }
+
+        stopStartId?.let(::stopSelfResult)
     }
 
     private suspend fun run(uuid: UUID) {

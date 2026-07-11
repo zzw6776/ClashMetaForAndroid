@@ -70,6 +70,8 @@ class OverrideSettingsDesign(
         )
 
         val screen = preferenceScreen(context) {
+            tips(R.string.remote_profile_inbound_protection_tips)
+
             category(R.string.general)
 
             editableText(

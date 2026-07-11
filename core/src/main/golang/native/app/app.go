@@ -3,11 +3,13 @@ package app
 import (
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 var appVersionName string
 var platformVersion int
+var installedAppsMutex sync.RWMutex
 var installedAppsUid = map[int]string{}
 
 func ApplyVersionName(versionName string) {
@@ -41,11 +43,16 @@ func NotifyInstallAppsChanged(uidList string) {
 		}
 	}
 
+	installedAppsMutex.Lock()
 	installedAppsUid = uids
+	installedAppsMutex.Unlock()
 }
 
 func QueryAppByUid(uid int) string {
-	return installedAppsUid[uid]
+	installedAppsMutex.RLock()
+	name := installedAppsUid[uid]
+	installedAppsMutex.RUnlock()
+	return name
 }
 
 func NotifyTimeZoneChanged(name string, offset int) {

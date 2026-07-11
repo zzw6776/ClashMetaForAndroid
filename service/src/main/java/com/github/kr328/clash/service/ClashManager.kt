@@ -60,7 +60,7 @@ class ClashManager(private val context: Context) : IClashManager,
                     var lastProcessTraffic = emptyMap<String, ProcessTraffic>()
                     var lastHistoryRevision = ConnectionHistoryRepository.revision
                     var activeTrafficIds = emptySet<String>()
-                    val persistedEvents = Channel<ConnectionHistoryEvents>(Channel.UNLIMITED)
+                    val persistedEvents = Channel<ConnectionHistoryEvents>(Channel.BUFFERED)
                     val persistedEventsJob = launch {
                         ConnectionHistoryRepository.events.collect { persistedEvents.send(it) }
                     }

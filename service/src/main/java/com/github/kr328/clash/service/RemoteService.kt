@@ -6,7 +6,7 @@ import com.github.kr328.clash.service.remote.IClashManager
 import com.github.kr328.clash.service.remote.IRemoteService
 import com.github.kr328.clash.service.remote.IProfileManager
 import com.github.kr328.clash.service.remote.wrap
-import com.github.kr328.clash.service.util.cancelAndJoinBlocking
+import kotlinx.coroutines.cancel
 
 class RemoteService : BaseService(), IRemoteService {
     private val binder = this.wrap()
@@ -26,10 +26,9 @@ class RemoteService : BaseService(), IRemoteService {
     }
 
     override fun onDestroy() {
+        clash?.cancel()
+        profile?.cancel()
         super.onDestroy()
-
-        clash?.cancelAndJoinBlocking()
-        profile?.cancelAndJoinBlocking()
     }
 
     override fun onBind(intent: Intent?): IBinder {

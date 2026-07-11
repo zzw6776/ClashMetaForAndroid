@@ -24,29 +24,33 @@ type ageKeyPair struct {
 }
 
 //export fetchAndValid
-func fetchAndValid(callback unsafe.Pointer, path, url C.c_string, force C.int) {
-	go func(path, url string, callback unsafe.Pointer) {
+func fetchAndValid(callback unsafe.Pointer, path, url, ageSecretKey C.c_string, force, allowConfigInbounds C.int) {
+	key := ""
+	if ageSecretKey != nil {
+		key = C.GoString(ageSecretKey)
+	}
+	go func(path, url, ageSecretKey string, callback unsafe.Pointer) {
 		cb := &remoteValidCallback{callback: callback}
 
-		err := config.FetchAndValid(path, url, force != 0, cb.reportStatus)
+		err := config.FetchAndValid(path, url, force != 0, ageSecretKey, allowConfigInbounds != 0, cb.reportStatus)
 
 		C.fetch_complete(callback, marshalString(err))
 
 		C.release_object(callback)
 
 		runtime.GC()
-	}(C.GoString(path), C.GoString(url), callback)
+	}(C.GoString(path), C.GoString(url), key, callback)
 }
 
 //export load
-func load(completable unsafe.Pointer, path C.c_string) {
-	go func(path string) {
-		C.complete(completable, marshalString(config.Load(path)))
+func load(completable unsafe.Pointer, path C.c_string, allowConfigInbounds C.int) {
+	go func(path string, allowConfigInbounds bool) {
+		C.complete(completable, marshalString(config.Load(path, allowConfigInbounds)))
 
 		C.release_object(completable)
 
 		runtime.GC()
-	}(C.GoString(path))
+	}(C.GoString(path), allowConfigInbounds != 0)
 }
 
 //export readOverride

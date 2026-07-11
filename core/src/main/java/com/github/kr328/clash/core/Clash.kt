@@ -89,7 +89,7 @@ object Clash {
         markSocket: (Int) -> Boolean,
         querySocketUid: (protocol: Int, source: InetSocketAddress, target: InetSocketAddress) -> Int
     ) {
-        Bridge.nativeStartTun(fd, stack, gateway, portal, dns, object : TunInterface {
+        val error = Bridge.nativeStartTun(fd, stack, gateway, portal, dns, object : TunInterface {
             override fun markSocket(fd: Int) {
                 markSocket(fd)
             }
@@ -102,6 +102,7 @@ object Clash {
                 )
             }
         })
+        if (error != null) throw ClashException(error)
     }
 
     fun stopTun() {
@@ -183,6 +184,8 @@ object Clash {
         path: File,
         url: String,
         force: Boolean,
+        ageSecretKey: String?,
+        allowConfigInbounds: Boolean,
         reportStatus: (FetchStatus) -> Unit
     ): CompletableDeferred<Unit> {
         return CompletableDeferred<Unit>().apply {
@@ -206,14 +209,16 @@ object Clash {
                 },
                 path.absolutePath,
                 url,
-                force
+                ageSecretKey,
+                force,
+                allowConfigInbounds,
             )
         }
     }
 
-    fun load(path: File): CompletableDeferred<Unit> {
+    fun load(path: File, allowConfigInbounds: Boolean): CompletableDeferred<Unit> {
         return CompletableDeferred<Unit>().apply {
-            Bridge.nativeLoad(this, path.absolutePath)
+            Bridge.nativeLoad(this, path.absolutePath, allowConfigInbounds)
         }
     }
 
@@ -265,13 +270,19 @@ object Clash {
     }
 
     fun subscribeLogcat(): ReceiveChannel<LogMessage> {
-        return Channel<LogMessage>(32).apply {
-            Bridge.nativeSubscribeLogcat(object : LogcatInterface {
-                override fun received(jsonPayload: String) {
-                    trySend(Json.decodeFromString(LogMessage.serializer(), jsonPayload))
-                }
-            })
+        val channel = Channel<LogMessage>(32)
+        val subscription = Bridge.nativeSubscribeLogcat(object : LogcatInterface {
+            override fun received(jsonPayload: String): Boolean {
+                val message = runCatching {
+                    Json.decodeFromString(LogMessage.serializer(), jsonPayload)
+                }.getOrNull() ?: return false
+                return channel.trySend(message).isSuccess
+            }
+        })
+        channel.invokeOnClose {
+            Bridge.nativeUnsubscribeLogcat(subscription)
         }
+        return channel
     }
 
     fun setAgeSecretKey(key: String?) {

@@ -19,6 +19,8 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.kaidl.runtime)
     implementation(libs.rikkax.multiprocess)
+
+    testImplementation(libs.junit)
 }
 
 afterEvaluate {

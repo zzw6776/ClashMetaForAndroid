@@ -19,7 +19,14 @@ object Bridge {
     external fun nativeNotifyDnsChanged(dnsList: String)
     external fun nativeNotifyTimeZoneChanged(name: String, offset: Int)
     external fun nativeNotifyInstalledAppChanged(uidList: String)
-    external fun nativeStartTun(fd: Int, stack: String, gateway: String, portal: String, dns: String, cb: TunInterface)
+    external fun nativeStartTun(
+        fd: Int,
+        stack: String,
+        gateway: String,
+        portal: String,
+        dns: String,
+        cb: TunInterface
+    ): String?
     external fun nativeStopTun()
     external fun nativeStartHttp(listenAt: String): String?
     external fun nativeStopHttp()
@@ -38,10 +45,16 @@ object Bridge {
         completable: FetchCallback,
         path: String,
         url: String,
-        force: Boolean
+        ageSecretKey: String?,
+        force: Boolean,
+        allowConfigInbounds: Boolean,
     )
 
-    external fun nativeLoad(completable: CompletableDeferred<Unit>, path: String)
+    external fun nativeLoad(
+        completable: CompletableDeferred<Unit>,
+        path: String,
+        allowConfigInbounds: Boolean,
+    )
     external fun nativeQueryProviders(): String
     external fun nativeUpdateProvider(
         completable: CompletableDeferred<Unit>,
@@ -53,7 +66,8 @@ object Bridge {
     external fun nativeWriteOverride(slot: Int, content: String)
     external fun nativeClearOverride(slot: Int)
     external fun nativeQueryConfiguration(): String
-    external fun nativeSubscribeLogcat(callback: LogcatInterface)
+    external fun nativeSubscribeLogcat(callback: LogcatInterface): Long
+    external fun nativeUnsubscribeLogcat(subscription: Long)
     external fun nativeCoreVersion(): String
 
     external fun nativeSetAgeSecretKey(key: String?)

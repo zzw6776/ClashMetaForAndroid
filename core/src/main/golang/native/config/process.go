@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/dlclark/regexp2"
 
 	"cfa/native/common"
+	"cfa/native/configsafe"
 
 	"github.com/metacubex/mihomo/common/utils"
 	"github.com/metacubex/mihomo/config"
@@ -17,7 +19,6 @@ import (
 )
 
 var processors = []processor{
-	patchExternalController, // must before patchOverride, so we only apply ExternalController in Override settings
 	patchOverride,
 	patchGeneral,
 	patchProfile,
@@ -31,20 +32,29 @@ var processors = []processor{
 type processor func(cfg *config.RawConfig, profileDir string) error
 
 func patchOverride(cfg *config.RawConfig, _ string) error {
-	if err := json.NewDecoder(strings.NewReader(ReadOverride(OverrideSlotPersist))).Decode(cfg); err != nil {
+	if err := applyOverride(cfg, ReadOverride(OverrideSlotPersist)); err != nil {
 		log.Warnln("Apply persist override: %s", err.Error())
 	}
-	if err := json.NewDecoder(strings.NewReader(ReadOverride(OverrideSlotSession))).Decode(cfg); err != nil {
+	if err := applyOverride(cfg, ReadOverride(OverrideSlotSession)); err != nil {
 		log.Warnln("Apply session override: %s", err.Error())
 	}
 
 	return nil
 }
 
+func applyOverride(cfg *config.RawConfig, content string) error {
+	return json.NewDecoder(strings.NewReader(content)).Decode(cfg)
+}
+
 func patchExternalController(cfg *config.RawConfig, _ string) error {
 	cfg.ExternalController = ""
 	cfg.ExternalControllerTLS = ""
 
+	return nil
+}
+
+func patchProfileInbounds(cfg *config.RawConfig, _ string, allowConfigInbounds bool) error {
+	configsafe.ApplyInboundPolicy(cfg, allowConfigInbounds)
 	return nil
 }
 
@@ -108,6 +118,11 @@ func patchListeners(cfg *config.RawConfig, _ string) error {
 
 func patchProviders(cfg *config.RawConfig, profileDir string) error {
 	forEachProviders(cfg, func(index int, total int, key string, provider map[string]any, prefix string) {
+		configuredLimit, err := strconv.ParseInt(fmt.Sprint(provider["size-limit"]), 10, 64)
+		if err != nil || configuredLimit <= 0 || configuredLimit > maximumFetchedFileBytes {
+			provider["size-limit"] = maximumFetchedFileBytes
+		}
+
 		path, _ := provider["path"].(string)
 		if len(path) > 0 {
 			path = common.ResolveAsRoot(path)
@@ -134,7 +149,16 @@ func validConfig(cfg *config.RawConfig, _ string) error {
 	return nil
 }
 
-func process(cfg *config.RawConfig, profileDir string) error {
+func process(cfg *config.RawConfig, profileDir string, allowConfigInbounds bool) error {
+	// Always strip profile-provided controllers first. The trusted application
+	// override may restore the supported controller configuration afterwards.
+	if err := patchExternalController(cfg, profileDir); err != nil {
+		return err
+	}
+	if err := patchProfileInbounds(cfg, profileDir, allowConfigInbounds); err != nil {
+		return err
+	}
+
 	for _, p := range processors {
 		if err := p(cfg, profileDir); err != nil {
 			return err

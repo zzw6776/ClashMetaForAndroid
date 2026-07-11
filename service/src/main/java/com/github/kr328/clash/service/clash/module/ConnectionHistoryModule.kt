@@ -87,38 +87,46 @@ class ConnectionHistoryModule(service: Service) : Module<Unit>(service) {
             }
         } finally {
             withContext(NonCancellable) {
-                val currentSessionId = sessionId
-                if (
-                    currentSessionId != null &&
-                    store.connectionHistoryEnabled &&
-                    store.connectionHistorySessionId == currentSessionId &&
-                    Clash.isConnectionHistoryEnabled()
-                ) {
-                    while (true) {
-                        val events = Clash.peekConnectionHistoryEvents(EVENT_BATCH_SIZE) ?: break
-                        if (events.ackSequence <= 0L) break
+                val flushed = withTimeoutOrNull(SHUTDOWN_FLUSH_TIMEOUT_MILLIS) {
+                    try {
+                        val currentSessionId = sessionId
+                        if (
+                            currentSessionId != null &&
+                            store.connectionHistoryEnabled &&
+                            store.connectionHistorySessionId == currentSessionId &&
+                            Clash.isConnectionHistoryEnabled()
+                        ) {
+                            var batchCount = 0
+                            while (batchCount < MAX_SHUTDOWN_EVENT_BATCHES) {
+                                val events = Clash.peekConnectionHistoryEvents(EVENT_BATCH_SIZE)
+                                    ?: break
+                                if (events.ackSequence <= 0L) break
 
-                        val persisted = runCatching {
-                            ConnectionHistoryRepository.persistEvents(currentSessionId, events)
-                            Clash.ackConnectionHistoryEvents(events.ackToken, events.ackSequence)
-                        }.onFailure {
-                            Log.w("Failed to flush connection history during shutdown", it)
-                        }.isSuccess
-                        if (!persisted) break
-                    }
-                    Clash.queryConnectionSnapshot()?.let { snapshot ->
-                        runCatching {
-                            ConnectionHistoryRepository.checkpointActive(
-                                currentSessionId,
-                                snapshot.connections.orEmpty()
-                            )
-                            ConnectionHistoryRepository.persistProcessTrafficDelta(
-                                currentSessionId,
-                                snapshot.processTraffic,
-                                previousProcessTraffic
-                            )
+                                ConnectionHistoryRepository.persistEvents(currentSessionId, events)
+                                Clash.ackConnectionHistoryEvents(events.ackToken, events.ackSequence)
+                                batchCount++
+                            }
+                            Clash.queryConnectionSnapshot()?.let { snapshot ->
+                                ConnectionHistoryRepository.checkpointActive(
+                                    currentSessionId,
+                                    snapshot.connections.orEmpty()
+                                )
+                                ConnectionHistoryRepository.persistProcessTrafficDelta(
+                                    currentSessionId,
+                                    snapshot.processTraffic,
+                                    previousProcessTraffic
+                                )
+                            }
                         }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w("Failed to flush connection history during shutdown", e)
                     }
+                    true
+                }
+                if (flushed != true) {
+                    Log.w("Connection history shutdown flush timed out")
                 }
             }
         }
@@ -129,5 +137,7 @@ class ConnectionHistoryModule(service: Service) : Module<Unit>(service) {
         private const val ACTIVE_CHECKPOINT_INTERVAL_MILLIS = 10_000L
         private const val PROCESS_CHECKPOINT_INTERVAL_MILLIS = 1_000L
         private const val EVENT_BATCH_SIZE = 500
+        private const val MAX_SHUTDOWN_EVENT_BATCHES = 20
+        private const val SHUTDOWN_FLUSH_TIMEOUT_MILLIS = 3_000L
     }
 }

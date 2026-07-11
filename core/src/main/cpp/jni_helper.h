@@ -12,6 +12,7 @@ struct _scoped_jni {
 };
 
 extern void initialize_jni(JavaVM *vm, JNIEnv *env);
+extern void release_jni(JNIEnv *env);
 extern jstring jni_new_string(JNIEnv *env, const char *str);
 extern char *jni_get_string(JNIEnv *env, jstring str);
 extern int jni_catch_exception(JNIEnv *env);

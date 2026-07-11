@@ -1,6 +1,8 @@
 package com.github.kr328.clash.service
 
 import android.content.Context
+import androidx.room.withTransaction
+import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.service.data.Database
 import com.github.kr328.clash.service.data.ImportedDao
 import com.github.kr328.clash.service.data.Pending
@@ -9,14 +11,18 @@ import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.service.remote.IFetchObserver
 import com.github.kr328.clash.service.remote.IProfileManager
 import com.github.kr328.clash.service.store.ServiceStore
+import com.github.kr328.clash.service.util.PreparedDirectoryReplacement
+import com.github.kr328.clash.service.util.createNewFileChecked
 import com.github.kr328.clash.service.util.directoryLastModified
 import com.github.kr328.clash.service.util.generateProfileUUID
 import com.github.kr328.clash.service.util.importedDir
+import com.github.kr328.clash.service.util.mkdirsChecked
 import com.github.kr328.clash.service.util.pendingDir
 import com.github.kr328.clash.service.util.sendProfileChanged
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.FileNotFoundException
 import java.util.*
@@ -33,36 +39,40 @@ class ProfileManager(private val context: Context) : IProfileManager,
         }
     }
 
-    override suspend fun create(type: Profile.Type, name: String, source: String, ageSecretKey: String?): UUID {
-        val uuid = generateProfileUUID()
-        val pending = Pending(
-            uuid = uuid,
-            name = name,
-            type = type,
-            source = source,
-            interval = 0,
-            upload = 0,
-            total = 0,
-            download = 0,
-            expire = 0,
-            ageSecretKey = ageSecretKey,
-        )
+    override suspend fun create(type: Profile.Type, name: String, source: String, ageSecretKey: String?): UUID =
+        profileFileLock.withLock {
+            val uuid = generateProfileUUID()
+            val pending = Pending(
+                uuid = uuid,
+                name = name,
+                type = type,
+                source = source,
+                interval = 0,
+                upload = 0,
+                total = 0,
+                download = 0,
+                expire = 0,
+                ageSecretKey = ageSecretKey,
+            )
 
-        PendingDao().insert(pending)
+            val target = context.pendingDir.resolve(uuid.toString())
+            val replacement = createEmptyProfileReplacement(target)
+            try {
+                val database = Database.database
+                database.withTransaction {
+                    replacement.activate()
+                    database.openPendingDao().insert(pending)
+                }
+            } catch (e: Throwable) {
+                replacement.rollbackAfter(e)
+                throw e
+            }
+            replacement.commitAndLog(target)
 
-        context.pendingDir.resolve(uuid.toString()).apply {
-            deleteRecursively()
-            mkdirs()
-
-            @Suppress("BlockingMethodInNonBlockingContext")
-            resolve("config.yaml").createNewFile()
-            resolve("providers").mkdir()
+            uuid
         }
 
-        return uuid
-    }
-
-    override suspend fun clone(uuid: UUID): UUID {
+    override suspend fun clone(uuid: UUID): UUID = profileFileLock.withLock {
         val newUUID = generateProfileUUID()
 
         val imported = ImportedDao().queryByUUID(uuid)
@@ -81,24 +91,38 @@ class ProfileManager(private val context: Context) : IProfileManager,
             ageSecretKey = imported.ageSecretKey
         )
 
-        cloneImportedFiles(uuid, newUUID)
+        val target = context.pendingDir.resolve(newUUID.toString())
+        val replacement = PreparedDirectoryReplacement.copyOf(
+            source = context.importedDir.resolve(uuid.toString()),
+            target = target,
+        )
+        try {
+            val database = Database.database
+            database.withTransaction {
+                if (database.openImportedDao().queryByUUID(uuid) == null) {
+                    throw FileNotFoundException("profile $uuid not found")
+                }
+                replacement.activate()
+                database.openPendingDao().insert(pending)
+            }
+        } catch (e: Throwable) {
+            replacement.rollbackAfter(e)
+            throw e
+        }
+        replacement.commitAndLog(target)
 
-        PendingDao().insert(pending)
-
-        return newUUID
+        newUUID
     }
 
-    override suspend fun patch(uuid: UUID, name: String, source: String, interval: Long, ageSecretKey: String?) {
-        val pending = PendingDao().queryByUUID(uuid)
+    override suspend fun patch(uuid: UUID, name: String, source: String, interval: Long, ageSecretKey: String?) =
+        profileFileLock.withLock {
+            val pending = PendingDao().queryByUUID(uuid)
 
-        if (pending == null) {
-            val imported = ImportedDao().queryByUUID(uuid)
-                ?: throw FileNotFoundException("profile $uuid not found")
+            if (pending == null) {
+                val imported = ImportedDao().queryByUUID(uuid)
+                    ?: throw FileNotFoundException("profile $uuid not found")
 
-            cloneImportedFiles(uuid)
-
-            PendingDao().insert(
-                Pending(
+                val newPending = Pending(
                     uuid = imported.uuid,
                     name = name,
                     type = imported.type,
@@ -110,22 +134,52 @@ class ProfileManager(private val context: Context) : IProfileManager,
                     expire = 0,
                     ageSecretKey = ageSecretKey,
                 )
-            )
-        } else {
-            val newPending = pending.copy(
-                name = name,
-                source = source,
-                interval = interval,
-                upload = 0,
-                total = 0,
-                download = 0,
-                expire = 0,
-                ageSecretKey = ageSecretKey,
-            )
+                val target = context.pendingDir.resolve(uuid.toString())
+                val replacement = PreparedDirectoryReplacement.copyOf(
+                    source = context.importedDir.resolve(uuid.toString()),
+                    target = target,
+                )
+                val installed = try {
+                    val database = Database.database
+                    database.withTransaction {
+                        val pendingDao = database.openPendingDao()
+                        if (pendingDao.queryByUUID(uuid) != null) {
+                            return@withTransaction false
+                        }
+                        if (database.openImportedDao().queryByUUID(uuid) == null) {
+                            throw FileNotFoundException("profile $uuid not found")
+                        }
 
-            PendingDao().update(newPending)
+                        replacement.activate()
+                        pendingDao.insert(newPending)
+                        true
+                    }
+                } catch (e: Throwable) {
+                    replacement.rollbackAfter(e)
+                    throw e
+                }
+
+                if (installed) {
+                    replacement.commitAndLog(target)
+                } else {
+                    replacement.rollback()
+                    PendingDao().update(newPending)
+                }
+            } else {
+                val newPending = pending.copy(
+                    name = name,
+                    source = source,
+                    interval = interval,
+                    upload = 0,
+                    total = 0,
+                    download = 0,
+                    expire = 0,
+                    ageSecretKey = ageSecretKey,
+                )
+
+                PendingDao().update(newPending)
+            }
         }
-    }
 
     override suspend fun update(uuid: UUID) {
         scheduleUpdate(uuid, true)
@@ -213,16 +267,26 @@ class ProfileManager(private val context: Context) : IProfileManager,
             ?: -1
     }
 
-    private fun cloneImportedFiles(source: UUID, target: UUID = source) {
-        val s = context.importedDir.resolve(source.toString())
-        val t = context.pendingDir.resolve(target.toString())
+    private fun createEmptyProfileReplacement(target: java.io.File): PreparedDirectoryReplacement {
+        return PreparedDirectoryReplacement.create(target) { staging ->
+            @Suppress("BlockingMethodInNonBlockingContext")
+            staging.resolve("config.yaml").createNewFileChecked()
+            staging.resolve("providers").mkdirsChecked()
+        }
+    }
 
-        if (!s.exists())
-            throw FileNotFoundException("profile $source not found")
+    private fun PreparedDirectoryReplacement.commitAndLog(target: java.io.File) {
+        commit()?.let {
+            Log.w("Unable to remove replaced directory backup for $target", it)
+        }
+    }
 
-        t.deleteRecursively()
-
-        s.copyRecursively(t)
+    private fun PreparedDirectoryReplacement.rollbackAfter(cause: Throwable) {
+        try {
+            rollback()
+        } catch (rollbackError: Throwable) {
+            cause.addSuppressed(rollbackError)
+        }
     }
 
     private suspend fun scheduleUpdate(uuid: UUID, startImmediately: Boolean) {

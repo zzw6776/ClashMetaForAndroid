@@ -177,11 +177,15 @@ subprojects {
             }
         }
 
+        val releaseSigningConfig = signingConfigs.findByName("release")
+
         buildTypes {
             named("release") {
                 isMinifyEnabled = isApp
                 isShrinkResources = isApp
-                signingConfig = signingConfigs.findByName("release") ?: signingConfigs["debug"]
+                if (isApp) {
+                    signingConfig = releaseSigningConfig
+                }
                 proguardFiles(
                     getDefaultProguardFile("proguard-android-optimize.txt"),
                     "proguard-rules.pro"
@@ -189,6 +193,25 @@ subprojects {
             }
             named("debug") {
                 versionNameSuffix = ".debug"
+            }
+        }
+
+        if (isApp && releaseSigningConfig == null) {
+            val validateReleaseSigning = project.tasks.register("validateReleaseSigning") {
+                doLast {
+                    throw org.gradle.api.GradleException(
+                        "Release signing configuration is missing. " +
+                            "Create signing.properties before assembling, bundling, or installing a release build."
+                    )
+                }
+            }
+
+            project.tasks.configureEach {
+                val isReleasePackagingTask = name.endsWith("Release") &&
+                    (name.startsWith("assemble") || name.startsWith("bundle") || name.startsWith("install"))
+                if (isReleasePackagingTask) {
+                    dependsOn(validateReleaseSigning)
+                }
             }
         }
 

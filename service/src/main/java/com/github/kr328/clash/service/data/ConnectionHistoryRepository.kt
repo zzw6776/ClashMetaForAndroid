@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.TimeUnit
 
 object ConnectionHistoryRepository {
     private val _events = MutableSharedFlow<ConnectionHistoryEvents>(extraBufferCapacity = 64)
@@ -99,7 +100,12 @@ object ConnectionHistoryRepository {
                     failedAt = failedAt
                 )
             }
-            if (emitted.isNotEmpty()) revisionCounter.incrementAndGet()
+            val pruned = if (emitted.isNotEmpty()) {
+                pruneTerminalHistory(sessionId, now)
+            } else {
+                0
+            }
+            if (emitted.isNotEmpty() || pruned > 0) revisionCounter.incrementAndGet()
         }
         emitted.forEach { _events.emit(it) }
     }
@@ -117,7 +123,8 @@ object ConnectionHistoryRepository {
                 },
                 checkpointAt = now
             )
-            if (historyChanged) revisionCounter.incrementAndGet()
+            val pruned = pruneTerminalHistory(sessionId, now)
+            if (historyChanged || pruned > 0) revisionCounter.incrementAndGet()
         }
     }
 
@@ -263,6 +270,14 @@ object ConnectionHistoryRepository {
         processTrafficCache.clear()
     }
 
+    private suspend fun pruneTerminalHistory(sessionId: String, now: Long): Int {
+        return dao.pruneTerminalHistory(
+            sessionId = sessionId,
+            cutoff = now - HISTORY_RETENTION_MILLIS,
+            maximumRows = MAX_TERMINAL_HISTORY_ROWS
+        )
+    }
+
     private fun Connection.toHistory(sessionId: String, status: String, now: Long): ConnectionHistory {
         return ConnectionHistory(
             sessionId = sessionId,
@@ -311,4 +326,6 @@ object ConnectionHistoryRepository {
 
     private const val WRITE_BATCH_SIZE = 100
     private const val MAX_PAGE_SIZE = 200
+    internal const val MAX_TERMINAL_HISTORY_ROWS = 10_000
+    internal val HISTORY_RETENTION_MILLIS: Long = TimeUnit.DAYS.toMillis(7)
 }

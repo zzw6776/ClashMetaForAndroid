@@ -15,11 +15,14 @@ import (
 	"time"
 
 	"cfa/native/app"
+	NC "cfa/native/common"
 
 	"github.com/metacubex/mihomo/adapter/provider"
 	clashHttp "github.com/metacubex/mihomo/component/http"
 	RB "github.com/metacubex/mihomo/rules/bundle"
 )
+
+const maximumFetchedFileBytes int64 = 128 * 1024 * 1024
 
 type Status struct {
 	Action            string   `json:"action"`
@@ -43,6 +46,14 @@ func openUrl(ctx context.Context, url string) (io.ReadCloser, fetchHeader, error
 
 	if err != nil {
 		return nil, fetchHeader{}, err
+	}
+	if response.ContentLength > maximumFetchedFileBytes {
+		_ = response.Body.Close()
+		return nil, fetchHeader{}, fmt.Errorf(
+			"response content length %d exceeds maximum size of %d bytes",
+			response.ContentLength,
+			maximumFetchedFileBytes,
+		)
 	}
 
 	return response.Body, fetchHeader{
@@ -78,25 +89,7 @@ func fetch(url *U.URL, file string) (fetchHeader, error) {
 
 	defer reader.Close()
 
-	return header, writeFile(file, reader)
-}
-
-func writeFile(file string, reader io.Reader) error {
-	_ = os.MkdirAll(P.Dir(file), 0700)
-
-	f, err := os.OpenFile(file, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0600)
-	if err != nil {
-		return err
-	}
-
-	defer f.Close()
-
-	_, err = io.Copy(f, reader)
-	if err != nil {
-		_ = os.Remove(file)
-	}
-
-	return err
+	return header, NC.WriteFileLimited(file, reader, maximumFetchedFileBytes)
 }
 
 func parseProfileUpdateInterval(value string) (int64, bool) {
@@ -152,6 +145,8 @@ func FetchAndValid(
 	path string,
 	url string,
 	force bool,
+	ageSecretKey string,
+	allowConfigInbounds bool,
 	reportStatus func(string),
 ) error {
 	configPath := P.Join(path, "config.yaml")
@@ -181,7 +176,11 @@ func FetchAndValid(
 
 	defer runtime.GC()
 
-	rawCfg, err := UnmarshalAndPatch(path)
+	secretKeys := make([]string, 0, 1)
+	if ageSecretKey != "" {
+		secretKeys = append(secretKeys, ageSecretKey)
+	}
+	rawCfg, err := UnmarshalAndPatchWithSecretKeys(path, allowConfigInbounds, secretKeys...)
 	if err != nil {
 		return err
 	}
@@ -227,7 +226,7 @@ func FetchAndValid(
 					// so we maintain consistency with the old behavior.
 					if file, err := RB.Open(pib); err == nil {
 						defer file.Close()
-						if err := writeFile(ps, file); err == nil {
+						if err := NC.WriteFileLimited(ps, file, maximumFetchedFileBytes); err == nil {
 							return
 						}
 					}

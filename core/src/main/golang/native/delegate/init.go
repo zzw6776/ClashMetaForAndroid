@@ -10,6 +10,7 @@ import (
 	"github.com/metacubex/mihomo/log"
 
 	"cfa/native/app"
+	"cfa/native/common"
 	"cfa/native/platform"
 
 	"github.com/metacubex/mihomo/component/dialer"
@@ -19,6 +20,8 @@ import (
 var errBlocked = errors.New("blocked")
 
 func Init(home, versionName, gitVersion string, platformVersion int) {
+	common.ConfigureRegexpTimeout()
+
 	log.Infoln("Init core, home: %s, versionName: %s, gitVersion: %s, platformVersion: %d", home, versionName, gitVersion, platformVersion)
 	constant.SetHomeDir(home)
 	// gitVersion = ${CURRENT_BRANCH}_${COMMIT_HASH}_${COMPILE_TIME}

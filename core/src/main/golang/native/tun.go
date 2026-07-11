@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sync/semaphore"
@@ -64,7 +65,7 @@ func (t *remoteTun) close() {
 }
 
 //export startTun
-func startTun(fd C.int, stack, gateway, portal, dns C.c_string, callback unsafe.Pointer) C.int {
+func startTun(fd C.int, stack, gateway, portal, dns C.c_string, callback unsafe.Pointer) *C.char {
 	rTunLock.Lock()
 	defer rTunLock.Unlock()
 
@@ -85,16 +86,17 @@ func startTun(fd C.int, stack, gateway, portal, dns C.c_string, callback unsafe.
 
 	closer, err := tun.Start(f, s, g, p, d)
 	if err != nil {
+		_ = syscall.Close(f)
 		remote.close()
 
-		return 1
+		return C.CString(err.Error())
 	}
 
 	remote.closer = closer
 
 	rTun = remote
 
-	return 0
+	return nil
 }
 
 //export stopTun

@@ -15,7 +15,7 @@ import kotlinx.coroutines.selects.SelectClause1
 import kotlinx.coroutines.withContext
 
 abstract class Module<E>(val service: Service) {
-    private val events: Channel<E> = Channel(Channel.UNLIMITED)
+    private val events: Channel<E> = Channel(Channel.BUFFERED)
     private val receivers: MutableList<BroadcastReceiver> = mutableListOf()
 
     val onEvent: SelectClause1<E>
@@ -27,7 +27,7 @@ abstract class Module<E>(val service: Service) {
 
     protected fun receiveBroadcast(
         requireSelf: Boolean = true,
-        capacity: Int = Channel.UNLIMITED,
+        capacity: Int = Channel.BUFFERED,
         configure: IntentFilter.() -> Unit
     ): ReceiveChannel<Intent> {
         val filter = IntentFilter().apply(configure)

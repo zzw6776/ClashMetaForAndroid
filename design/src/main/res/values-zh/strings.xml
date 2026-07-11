@@ -229,6 +229,7 @@
     <string name="invalid_file_name">非法的文件名称</string>
     <string name="reset_override_settings">重置覆写设置</string>
     <string name="reset_override_settings_message">所有的覆写设置将会被擦除</string>
+    <string name="remote_profile_inbound_protection_tips"><![CDATA[<strong>远程配置安全保护：</strong>URL 和外部配置不能创建入站服务。代理端口、DNS 监听、自定义 listeners、tunnels 和内置服务端监听会先被清除，再应用本页覆写。需要时请在此主动开启受支持的标准监听；File 本地配置保持原有行为。]]></string>
     <string name="key">键</string>
     <string name="more">更多</string>
     <string name="save">保存</string>

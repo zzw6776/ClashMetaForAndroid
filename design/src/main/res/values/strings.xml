@@ -317,6 +317,7 @@
 
     <string name="reset_override_settings">Reset Override Settings</string>
     <string name="reset_override_settings_message">All override settings will be discarded</string>
+    <string name="remote_profile_inbound_protection_tips"><![CDATA[<strong>Remote profile protection:</strong> URL and external profiles cannot create inbound services. Proxy ports, DNS listeners, custom listeners, tunnels, and built-in server listeners are removed before overrides are applied. Use this page to explicitly enable supported standard listeners. File profiles keep their existing behavior.]]></string>
     <string name="key">Key</string>
 
     <string name="use_built_in">Use Built-in</string>

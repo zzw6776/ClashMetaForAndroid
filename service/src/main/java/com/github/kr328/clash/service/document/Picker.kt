@@ -2,13 +2,19 @@ package com.github.kr328.clash.service.document
 
 import android.content.Context
 import android.provider.DocumentsContract
+import androidx.room.withTransaction
+import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.service.R
+import com.github.kr328.clash.service.profileFileLock
+import com.github.kr328.clash.service.data.Database
 import com.github.kr328.clash.service.data.ImportedDao
 import com.github.kr328.clash.service.data.Pending
 import com.github.kr328.clash.service.data.PendingDao
 import com.github.kr328.clash.service.model.Profile
+import com.github.kr328.clash.service.util.PreparedDirectoryReplacement
 import com.github.kr328.clash.service.util.importedDir
 import com.github.kr328.clash.service.util.pendingDir
+import kotlinx.coroutines.sync.withLock
 import java.io.FileNotFoundException
 import java.util.*
 
@@ -121,28 +127,56 @@ class Picker(private val context: Context) {
     }
 
     private suspend fun cloneToPending(uuid: UUID) {
-        if (PendingDao().queryByUUID(uuid) != null)
-            return
+        profileFileLock.withLock {
+            if (PendingDao().queryByUUID(uuid) != null)
+                return@withLock
 
-        val imported =
-            ImportedDao().queryByUUID(uuid) ?: throw FileNotFoundException("profile not found")
+            val imported =
+                ImportedDao().queryByUUID(uuid) ?: throw FileNotFoundException("profile not found")
 
-        PendingDao().insert(
-            Pending(
+            val pending = Pending(
                 imported.uuid,
                 imported.name,
                 imported.type,
                 imported.source,
                 imported.interval,
                 0,0,0,0,
-                ageSecretKey = imported.ageSecretKey
+                ageSecretKey = imported.ageSecretKey,
             )
-        )
+            val source = context.importedDir.resolve(uuid.toString())
+            val target = context.pendingDir.resolve(uuid.toString())
+            val replacement = PreparedDirectoryReplacement.copyOf(source, target)
+            val installed = try {
+                val database = Database.database
+                database.withTransaction {
+                    val pendingDao = database.openPendingDao()
+                    if (pendingDao.queryByUUID(uuid) != null) {
+                        return@withTransaction false
+                    }
+                    if (database.openImportedDao().queryByUUID(uuid) == null) {
+                        throw FileNotFoundException("profile not found")
+                    }
 
-        val source = context.importedDir.resolve(uuid.toString())
-        val target = context.pendingDir.resolve(uuid.toString())
+                    replacement.activate()
+                    pendingDao.insert(pending)
+                    true
+                }
+            } catch (e: Throwable) {
+                try {
+                    replacement.rollback()
+                } catch (rollbackError: Throwable) {
+                    e.addSuppressed(rollbackError)
+                }
+                throw e
+            }
 
-        target.deleteRecursively()
-        source.copyRecursively(target)
+            if (installed) {
+                replacement.commit()?.let {
+                    Log.w("Unable to remove replaced directory backup for $target", it)
+                }
+            } else {
+                replacement.rollback()
+            }
+        }
     }
 }

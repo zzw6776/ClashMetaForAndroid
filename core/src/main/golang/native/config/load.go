@@ -29,7 +29,25 @@ func logDns(cfg *config.RawConfig) {
 	}
 }
 
-func UnmarshalAndPatch(profilePath string) (*config.RawConfig, error) {
+func UnmarshalAndPatch(profilePath string, allowConfigInbounds bool) (*config.RawConfig, error) {
+	return unmarshalAndPatch(profilePath, allowConfigInbounds, config.UnmarshalRawConfig)
+}
+
+func UnmarshalAndPatchWithSecretKeys(
+	profilePath string,
+	allowConfigInbounds bool,
+	secretKeys ...string,
+) (*config.RawConfig, error) {
+	return unmarshalAndPatch(profilePath, allowConfigInbounds, func(data []byte) (*config.RawConfig, error) {
+		return config.UnmarshalRawConfigWithSecretKeys(data, secretKeys...)
+	})
+}
+
+func unmarshalAndPatch(
+	profilePath string,
+	allowConfigInbounds bool,
+	unmarshal func([]byte) (*config.RawConfig, error),
+) (*config.RawConfig, error) {
 	configPath := P.Join(profilePath, "config.yaml")
 
 	configData, err := os.ReadFile(configPath)
@@ -37,12 +55,12 @@ func UnmarshalAndPatch(profilePath string) (*config.RawConfig, error) {
 		return nil, err
 	}
 
-	rawConfig, err := config.UnmarshalRawConfig(configData)
+	rawConfig, err := unmarshal(configData)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := process(rawConfig, profilePath); err != nil {
+	if err := process(rawConfig, profilePath, allowConfigInbounds); err != nil {
 		return nil, err
 	}
 
@@ -58,8 +76,8 @@ func Parse(rawConfig *config.RawConfig) (*config.Config, error) {
 	return cfg, nil
 }
 
-func Load(path string) error {
-	rawCfg, err := UnmarshalAndPatch(path)
+func Load(path string, allowConfigInbounds bool) error {
+	rawCfg, err := UnmarshalAndPatch(path, allowConfigInbounds)
 	if err != nil {
 		log.Errorln("Load %s: %s", path, err.Error())
 

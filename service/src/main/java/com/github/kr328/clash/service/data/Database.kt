@@ -8,7 +8,6 @@ import com.github.kr328.clash.service.data.migrations.LEGACY_MIGRATION
 import com.github.kr328.clash.service.data.migrations.MIGRATIONS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.lang.ref.SoftReference
 import androidx.room.Database as DB
 
 @DB(
@@ -32,13 +31,11 @@ abstract class Database : RoomDatabase() {
 
     companion object {
         val database: Database
-            @Synchronized get() {
-                return softDatabase.get() ?: open(Global.application).apply {
-                    softDatabase = SoftReference(this)
-                }
-            }
+            get() = databaseInstance
 
-        private var softDatabase: SoftReference<Database?> = SoftReference(null)
+        private val databaseInstance: Database by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+            open(Global.application)
+        }
 
         private fun open(context: Context): Database {
             return Room.databaseBuilder(

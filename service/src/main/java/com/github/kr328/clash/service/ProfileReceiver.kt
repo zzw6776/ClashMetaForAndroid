@@ -85,14 +85,12 @@ class ProfileReceiver : BroadcastReceiver() {
                 return
 
             val current = System.currentTimeMillis()
-            val last = context.importedDir
+            val configFile = context.importedDir
                 .resolve(imported.uuid.toString())
                 .resolve("config.yaml")
-                .lastModified()
 
-            // file not existed
-            if (last < 0)
-                return
+            if (!configFile.isFile) return
+            val last = configFile.lastModified()
 
             val interval = (imported.interval - (current - last)).coerceAtLeast(0)
 

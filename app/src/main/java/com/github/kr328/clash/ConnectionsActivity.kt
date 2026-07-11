@@ -26,6 +26,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
     private var activeObserver: Any? = null
@@ -41,6 +42,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         val mergedConnectionMemberIds = mutableMapOf<String, List<String>>()
         val connectionSpeeds = mutableMapOf<String, Long>()
         val connectionUploadSpeeds = mutableMapOf<String, Long>()
+        val connectionTrafficSampleMillis = mutableMapOf<String, Long>()
         val packageNames = mutableMapOf<String, String>()
         val packageIcons = mutableMapOf<String, android.graphics.drawable.Drawable?>()
         val collapsedGroups = mutableSetOf<String>()
@@ -157,8 +159,10 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             return "$failedAt - N/A"
         }
 
-        fun boundedTrafficDelta(delta: Long): Long {
-            return if (delta in 0..MAX_REASONABLE_SPEED_BYTES_PER_SECOND) delta else 0L
+        fun speedBytesPerSecond(delta: Long, elapsedMillis: Long): Long {
+            if (delta < 0L || elapsedMillis <= 0L) return 0L
+            val speed = (delta.toDouble() * 1_000.0 / elapsedMillis.toDouble()).toLong()
+            return if (speed in 0..MAX_REASONABLE_SPEED_BYTES_PER_SECOND) speed else 0L
         }
 
         fun formatRuleText(connection: Connection): String {
@@ -248,6 +252,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
             connectionSpeeds[id] = 0L
             connectionUploadSpeeds[id] = 0L
+            connectionTrafficSampleMillis.remove(id)
         }
 
         fun updateConnectionDetails(binding: DesignConnectionDetailsPageBinding, id: String) {
@@ -331,7 +336,8 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 detailStatusFor(id) == ConnectionStatus.ACTIVE
         }
 
-        val diffChannel = Channel<ConnectionDiff>(Channel.UNLIMITED)
+        val diffChannel = Channel<ConnectionDiff>(Channel.BUFFERED)
+        val diffChannelOverflowed = AtomicBoolean(false)
         val deferredConnectionDiffs = mutableListOf<ConnectionDiff>()
         var historyReloading = false
 
@@ -541,27 +547,32 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                         updateDetailAction(binding, closeId)
                         return@setOnMenuItemClickListener true
                     }
+                    val connectionIds = if (closeId.startsWith("merged|")) {
+                        val parts = closeId.split("|")
+                        if (parts.size >= 4) {
+                            val basePkg = parts[1]
+                            val hostK = parts[2]
+                            connectionRecords.values
+                                .asSequence()
+                                .filterNot { it.closed }
+                                .filter { record ->
+                                    val pkg = normalizeProcessName(record.connection.metadata.process)
+                                    val hk = record.connection.metadata.host
+                                        .ifEmpty { record.connection.metadata.destinationIP }
+                                    pkg == basePkg && hk == hostK
+                                }
+                                .map { it.connection.id }
+                                .toList()
+                        } else {
+                            emptyList()
+                        }
+                    } else {
+                        listOf(closeId)
+                    }
                     this@ConnectionsActivity.launch(Dispatchers.IO) {
                         withTimeoutOrNull(REMOTE_CALL_TIMEOUT_MILLIS) {
                             com.github.kr328.clash.util.withClash {
-                                if (closeId.startsWith("merged|")) {
-                                    val parts = closeId.split("|")
-                                    if (parts.size >= 4) {
-                                        val basePkg = parts[1]
-                                        val hostK = parts[2]
-                                        connectionRecords.values.forEach { record ->
-                                            if (!record.closed) {
-                                                val pkg = normalizeProcessName(record.connection.metadata.process)
-                                                val hk = record.connection.metadata.host.ifEmpty { record.connection.metadata.destinationIP }
-                                                if (pkg == basePkg && hk == hostK) {
-                                                    closeConnection(record.connection.id)
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    closeConnection(closeId)
-                                }
+                                connectionIds.forEach(::closeConnection)
                             }
                         }
                     }
@@ -898,6 +909,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
             failedConnectionRecords.clear()
             connectionSpeeds.clear()
             connectionUploadSpeeds.clear()
+            connectionTrafficSampleMillis.clear()
             if (resetProcessFilter) {
                 selectedProcessKey = null
                 selectedProxyKey = null
@@ -1032,6 +1044,7 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
         fun applyConnectionDiff(diff: ConnectionDiff, refresh: Boolean = true) {
             try {
                 val batchMillis = System.currentTimeMillis()
+                val sampleMillis = diff.timestamp.takeIf { it > 0L } ?: batchMillis
                 processTrafficTotals = diff.processTraffic
                 diff.historyOverview?.let { historyOverviewGroups = it.groups }
                 val reconcileSnapshot = awaitingSnapshotReconcile && diff.timestamp > 0L
@@ -1041,10 +1054,23 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                 val newConnectionIds = diff.newConnections.mapTo(mutableSetOf()) { it.id }
 
                 for (conn in diff.newConnections) {
-                    if (!connectionRecords.containsKey(conn.id)) {
+                    val previous = connectionRecords[conn.id]
+                    val previousSampleMillis = connectionTrafficSampleMillis[conn.id]
+                    if (previous == null || previous.closed || previousSampleMillis == null) {
                         connectionSpeeds[conn.id] = 0L
                         connectionUploadSpeeds[conn.id] = 0L
+                    } else {
+                        val elapsedMillis = sampleMillis - previousSampleMillis
+                        connectionSpeeds[conn.id] = speedBytesPerSecond(
+                            conn.download - previous.connection.download,
+                            elapsedMillis
+                        )
+                        connectionUploadSpeeds[conn.id] = speedBytesPerSecond(
+                            conn.upload - previous.connection.upload,
+                            elapsedMillis
+                        )
                     }
+                    connectionTrafficSampleMillis[conn.id] = sampleMillis
                     connectionRecords[conn.id] = ConnectionRecord(
                         connection = conn,
                         startMillis = parseConnectionStartMillis(conn.start)
@@ -1095,8 +1121,18 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     val prevConn = record?.connection
                     if (record != null && prevConn != null && !record.closed) {
                         updatedTrafficIds.add(traffic.id)
-                        connectionSpeeds[traffic.id] = boundedTrafficDelta(traffic.download - prevConn.download)
-                        connectionUploadSpeeds[traffic.id] = boundedTrafficDelta(traffic.upload - prevConn.upload)
+                        val elapsedMillis = connectionTrafficSampleMillis[traffic.id]
+                            ?.let { sampleMillis - it }
+                            ?: 0L
+                        connectionSpeeds[traffic.id] = speedBytesPerSecond(
+                            traffic.download - prevConn.download,
+                            elapsedMillis
+                        )
+                        connectionUploadSpeeds[traffic.id] = speedBytesPerSecond(
+                            traffic.upload - prevConn.upload,
+                            elapsedMillis
+                        )
+                        connectionTrafficSampleMillis[traffic.id] = sampleMillis
                         record.connection = prevConn.copy(download = traffic.download, upload = traffic.upload)
                     }
                 }
@@ -1118,7 +1154,9 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
 
         val observer = object : IConnectionObserver {
             override fun onConnectionDiff(diff: ConnectionDiff) {
-                diffChannel.trySend(diff)
+                if (diffChannel.trySend(diff).isFailure) {
+                    diffChannelOverflowed.set(true)
+                }
             }
         }
         val observerBinder = com.github.kr328.clash.service.remote.IConnectionObserverDelegate(observer)
@@ -1464,6 +1502,11 @@ class ConnectionsActivity : BaseActivity<ConnectionsDesign>() {
                     }
                         diffChannel.onReceive { diff ->
                             if (!design.trackingEnabled) return@onReceive
+                            if (diffChannelOverflowed.getAndSet(false)) {
+                                while (diffChannel.tryReceive().isSuccess) Unit
+                                loadConnectionHistory()
+                                return@onReceive
+                            }
                             if (historyReloading) {
                                 deferredConnectionDiffs.add(diff)
                             } else {

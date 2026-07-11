@@ -17,6 +17,14 @@ void initialize_jni(JavaVM *vm, JNIEnv *env) {
     m_get_bytes = find_method(c_string, "getBytes", "()[B");
 }
 
+void release_jni(JNIEnv *env) {
+    if (c_string != NULL) {
+        del_global(c_string);
+        c_string = NULL;
+    }
+    global_vm = NULL;
+}
+
 JavaVM *global_java_vm() {
     return global_vm;
 }

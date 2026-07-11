@@ -142,6 +142,27 @@ interface ConnectionHistoryDao {
     @Query("DELETE FROM connection_sessions")
     suspend fun deleteAllSessions()
 
+    @Query(
+        "DELETE FROM connection_history WHERE sessionId = :sessionId " +
+            "AND status != 'ACTIVE' AND updatedAt < :cutoff"
+    )
+    suspend fun deleteTerminalHistoryOlderThan(sessionId: String, cutoff: Long): Int
+
+    @Query(
+        "DELETE FROM connection_history WHERE sessionId = :sessionId " +
+            "AND status != 'ACTIVE' AND id IN (" +
+            "SELECT id FROM connection_history WHERE sessionId = :sessionId " +
+            "AND status != 'ACTIVE' ORDER BY updatedAt DESC, id DESC " +
+            "LIMIT -1 OFFSET :maximumRows)"
+    )
+    suspend fun deleteTerminalHistoryBeyondLimit(sessionId: String, maximumRows: Int): Int
+
+    @Transaction
+    suspend fun pruneTerminalHistory(sessionId: String, cutoff: Long, maximumRows: Int): Int {
+        return deleteTerminalHistoryOlderThan(sessionId, cutoff) +
+            deleteTerminalHistoryBeyondLimit(sessionId, maximumRows)
+    }
+
     @Transaction
     suspend fun clearSession(sessionId: String) {
         deleteHistory(sessionId)
