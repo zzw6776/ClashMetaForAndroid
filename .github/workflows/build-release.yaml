@@ -1,0 +1,113 @@
+name: Build Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  BuildRelease:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Checkout submodules
+        run: git submodule update --init --recursive --force
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-download-base-url: https://github.com/MetaCubeX/go/releases/download/build
+          go-version: "1.26"
+
+      - name: Apply Patches
+        run: |
+          cd "$(go env GOROOT)"
+          for patch_file in "$GITHUB_WORKSPACE"/.github/patch/*.patch; do
+            patch --verbose -p 1 < "$patch_file"
+          done
+
+      - name: Cache Go build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Update CA
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates
+          sudo update-ca-certificates
+          cp -f /etc/ssl/certs/ca-certificates.crt core/src/foss/golang/clash/component/ca/ca-certificates.crt
+
+      - name: Restore signing properties
+        env:
+          SIGNING_ZIP_PASSWORD: ${{ secrets.SIGNING_PROPERTIES_ZIP_PASSWORD }}
+        run: |
+          if [ -z "$SIGNING_ZIP_PASSWORD" ]; then
+            echo "SIGNING_PROPERTIES_ZIP_PASSWORD is not configured." >&2
+            exit 1
+          fi
+
+          unzip -P "$SIGNING_ZIP_PASSWORD" -o signing.properties.zip signing.properties
+          chmod 600 signing.properties
+          test -s signing.properties
+          test -s release.keystore
+
+      - name: Build all Meta release APKs
+        run: ./gradlew --no-daemon :app:assembleMetaRelease
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          metadata_file=app/build/outputs/apk/meta/release/output-metadata.json
+          if [ ! -s "$metadata_file" ]; then
+            echo "APK output metadata was not generated." >&2
+            exit 1
+          fi
+
+          version_name=$(jq -er '[.elements[].versionName] | unique | if length == 1 then .[0] else error("inconsistent versionName") end' "$metadata_file")
+          version_code=$(jq -er '[.elements[].versionCode] | unique | if length == 1 then .[0] else error("inconsistent versionCode") end' "$metadata_file")
+          version_slug=$(printf '%s' "$version_name" | sed 's/[^A-Za-z0-9._-]/-/g')
+
+          shopt -s nullglob
+          apk_files=(app/build/outputs/apk/meta/release/*.apk)
+          if [ "${#apk_files[@]}" -eq 0 ]; then
+            echo "Meta release APKs were not generated." >&2
+            exit 1
+          fi
+
+          release_tag="v${version_slug}-main-build-${GITHUB_RUN_NUMBER}"
+          gh release create "$release_tag" "${apk_files[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "ClashMetaForAndroid v${version_name} (code ${version_code}) · main build #${GITHUB_RUN_NUMBER}" \
+            --notes "Automated main release for version ${version_name} (versionCode ${version_code}), commit ${GITHUB_SHA}." \
+            --generate-notes \
+            --draft
+
+          # Draft releases must not expose their generated Git tags publicly.
+          gh api --method DELETE \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${release_tag}" \
+            --silent || true
