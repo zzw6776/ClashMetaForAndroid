@@ -106,3 +106,8 @@ jobs:
             --notes "Automated main release for version ${version_name} (versionCode ${version_code}), commit ${GITHUB_SHA}." \
             --generate-notes \
             --draft
+
+          # Draft releases must not expose their generated Git tags publicly.
+          gh api --method DELETE \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${release_tag}" \
+            --silent || true
