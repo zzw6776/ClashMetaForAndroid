@@ -84,4 +84,4 @@ APP package name is `com.github.metacubex.clash.meta`
 - 每次推送 `main` 分支都会自动触发 `Build Release` Action：
   - 构建 `MetaRelease` 的 universal、arm64-v8a、armeabi-v7a、x86 和 x86_64 全部 APK。
   - 从 APK 构建元数据读取 `versionName` 和 `versionCode`，自动创建带版本号和运行编号的 GitHub Release。
-  - 将全部 APK 附加到 Release，并将本次 Release 标记为 Latest。
+  - 将全部 APK 附加到 Draft Release；草稿仅对拥有仓库写权限的协作者可见，不会公开展示。

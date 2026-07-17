@@ -105,4 +105,4 @@ jobs:
             --title "ClashMetaForAndroid v${version_name} (code ${version_code}) · main build #${GITHUB_RUN_NUMBER}" \
             --notes "Automated main release for version ${version_name} (versionCode ${version_code}), commit ${GITHUB_SHA}." \
             --generate-notes \
-            --latest
+            --draft
