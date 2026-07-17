@@ -81,7 +81,8 @@ APP package name is `com.github.metacubex.clash.meta`
 - When `MetaCubeX/Clash.Meta` kernel is updated to a new version, the `Update Dependencies` actions in this repo will be triggered automatically.
   - It will pull the new version of the meta kernel, update all the golang dependencies, and create a PR without manual intervention.
   - If there is any compile error in PR, you need to fix it before merging. Alternatively, you may merge the PR directly.
-- Manually triggering `Build Pre-Release` actions will compile and publish a `PreRelease` version.
-- Manually triggering `Build Release` actions will compile, tag and publish a `Release` version.
-  - You must fill the blank `Release Tag` with the tag you want to release in the format of `v1.2.3`.
-  - `versionName` and `versionCode` in `build.gradle.kts` will be automatically bumped to the tag you filled above.
+- 手动触发 `Build Pre-Release` Action 会构建并发布预发布版本。
+- 每次推送 `main` 分支都会自动触发 `Build Release` Action：
+  - 构建 `MetaRelease` 的 universal、arm64-v8a、armeabi-v7a、x86 和 x86_64 全部 APK。
+  - 从 APK 构建元数据读取 `versionName` 和 `versionCode`，自动创建带版本号和运行编号的 GitHub Release。
+  - 将全部 APK 附加到 Release，并将本次 Release 标记为 Latest。

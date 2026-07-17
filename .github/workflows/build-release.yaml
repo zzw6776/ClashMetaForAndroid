@@ -1,45 +1,50 @@
 name: Build Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      release-tag:
-        description: 'Release Tag (v2.x.x)'
-        required: true
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
 
 jobs:
   BuildRelease:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      
+
       - name: Checkout submodules
         run: git submodule update --init --recursive --force
 
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
-          distribution: "temurin"
-          java-version: 21
+          distribution: temurin
+          java-version: "21"
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Setup Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
-          go-download-base-url: 'https://github.com/MetaCubeX/go/releases/download/build'
-          go-version: '1.26'
+          go-download-base-url: https://github.com/MetaCubeX/go/releases/download/build
+          go-version: "1.26"
 
       - name: Apply Patches
         run: |
-          cd $(go env GOROOT)
-          for p in $GITHUB_WORKSPACE/.github/patch/*.patch; do patch --verbose -p 1 < "$p"; done
+          cd "$(go env GOROOT)"
+          for patch_file in "$GITHUB_WORKSPACE"/.github/patch/*.patch; do
+            patch --verbose -p 1 < "$patch_file"
+          done
 
-      - uses: actions/cache@v5
+      - name: Cache Go build
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/go-build
@@ -47,87 +52,57 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      
-      - name: Convert and set version env
-        id: process-version
-        run: |
-          VERSION_TAG=${{ inputs.release-tag }}
-          VERSION_TAG=${VERSION_TAG#v}                              # remove the 'v' prefix
-          IFS='.' read -ra VERSION_PARTS <<< "$VERSION_TAG"         # split into array
-          VERSION_CODE=$(printf "%1d%02d%03d" "${VERSION_PARTS[0]}" "${VERSION_PARTS[1]}" "${VERSION_PARTS[2]}")
-          
-          echo "versonName=$VERSION_TAG" >> $GITHUB_OUTPUT          # "1.2.3"
-          echo "versonCode=$VERSION_CODE" >> $GITHUB_OUTPUT         # "102003"
-      
-      # Re-write version in build.gradle.kts
-      - name: Re-write version
-        uses: Devofure/advance-android-version-actions@v1.5
-        with:
-          gradlePath: build.gradle.kts
-          versionCode: ${{ steps.process-version.outputs.versonCode }}
-          versionName: ${{ steps.process-version.outputs.versonName }}
-      
-      # If any change found, commit it and push
-      - name: Commit and push if changes
-        run: |
-          changes=$(git diff --name-only origin/main | wc -l)
-          if [ $changes -gt 0 ]
-          then
-            newVersionName=${{ steps.process-version.outputs.versonName }}
-            newVersionCode=${{ steps.process-version.outputs.versonCode }}
-            git config --global user.name 'GitHub Action'
-            git config --global user.email 'action@github.com'
-            git add build.gradle.kts
-            git commit -am "Bump version to $newVersionName ($newVersionCode)"
-            git tag "v$newVersionName"
-            git push --follow-tags
-          fi
 
       - name: Update CA
         run: |
-          sudo apt-get update && sudo apt-get install ca-certificates
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates
           sudo update-ca-certificates
           cp -f /etc/ssl/certs/ca-certificates.crt core/src/foss/golang/clash/component/ca/ca-certificates.crt
 
-      - name: Signing properties
+      - name: Restore signing properties
         env:
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_ZIP_PASSWORD: ${{ secrets.SIGNING_PROPERTIES_ZIP_PASSWORD }}
         run: |
-          touch signing.properties
-          echo keystore.password="$SIGNING_STORE_PASSWORD" > signing.properties
-          echo key.alias="$SIGNING_KEY_ALIAS" >> signing.properties
-          echo key.password="$SIGNING_KEY_PASSWORD" >> signing.properties
-            
-          echo "cat signing.properties"
-          cat signing.properties
+          if [ -z "$SIGNING_ZIP_PASSWORD" ]; then
+            echo "SIGNING_PROPERTIES_ZIP_PASSWORD is not configured." >&2
+            exit 1
+          fi
 
-      - name: Release Build
-        if: success()
-        run: ./gradlew --no-daemon app:assembleMetaRelease
+          unzip -P "$SIGNING_ZIP_PASSWORD" -o signing.properties.zip signing.properties
+          chmod 600 signing.properties
+          test -s signing.properties
+          test -s release.keystore
 
-      - name: Tag Repo
-        uses: richardsimko/update-tag@v1
-        with:
-          tag_name: ${{ inputs.release-tag }}
+      - name: Build all Meta release APKs
+        run: ./gradlew --no-daemon :app:assembleMetaRelease
+
+      - name: Publish GitHub Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          metadata_file=app/build/outputs/apk/meta/release/output-metadata.json
+          if [ ! -s "$metadata_file" ]; then
+            echo "APK output metadata was not generated." >&2
+            exit 1
+          fi
 
-      - name: Upload Release
-        uses: softprops/action-gh-release@v1
-        if: ${{ success() }}
-        with:
-          tag_name: ${{ inputs.release-tag }}
-          files: app/build/outputs/apk/meta/release/*
-          generate_release_notes: true
+          version_name=$(jq -er '[.elements[].versionName] | unique | if length == 1 then .[0] else error("inconsistent versionName") end' "$metadata_file")
+          version_code=$(jq -er '[.elements[].versionCode] | unique | if length == 1 then .[0] else error("inconsistent versionCode") end' "$metadata_file")
+          version_slug=$(printf '%s' "$version_name" | sed 's/[^A-Za-z0-9._-]/-/g')
 
-      - name: Release Changelog Builder
-        uses: mikepenz/release-changelog-builder-action@v4.1.1
-        with:
-          configurationJson: |
-            {
-              "ignore_labels": [
-                "Update"
-              ],
-            }
+          shopt -s nullglob
+          apk_files=(app/build/outputs/apk/meta/release/*.apk)
+          if [ "${#apk_files[@]}" -eq 0 ]; then
+            echo "Meta release APKs were not generated." >&2
+            exit 1
+          fi
+
+          release_tag="v${version_slug}-main-build-${GITHUB_RUN_NUMBER}"
+          gh release create "$release_tag" "${apk_files[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "ClashMetaForAndroid v${version_name} (code ${version_code}) · main build #${GITHUB_RUN_NUMBER}" \
+            --notes "Automated main release for version ${version_name} (versionCode ${version_code}), commit ${GITHUB_SHA}." \
+            --generate-notes \
+            --latest
